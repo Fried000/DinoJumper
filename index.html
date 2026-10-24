@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f7f7">
+  <title>Dino Jumper — A little further</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <header><a class="wordmark" href="./">DINO JUMPER<span>OFFLINE SPIRIT. NEW ADVENTURES.</span></a><button id="pause" type="button" aria-label="Pause game">Ⅱ</button></header>
+    <section class="intro"><p class="eyebrow">THE CLASSIC, WITH A FEW DETOURS</p><h1>A little further.</h1><p>Same little dino. A bigger world to jump through.</p></section>
+    <section class="game-shell" aria-label="Dinosaur runner game">
+      <div class="game-top"><span id="biome">01 / DESERT</span><span id="effect">JUST YOU AND THE HORIZON</span><span id="score">HI 00000 &nbsp; 00000</span></div>
+      <canvas id="game" width="1000" height="360" tabindex="0" aria-label="Dino runner. Space or up arrow to jump, press again to double jump. Down arrow to duck. P to pause."></canvas>
+      <div id="overlay" class="overlay"><p id="overlay-kicker">READY WHEN YOU ARE</p><h2 id="overlay-title">Let's go exploring.</h2><p id="overlay-text">Jump the cacti. Take the high road. See what's out there.</p><button id="start" type="button">START RUN <span>↗</span></button><small>SPACE / ↑ / TAP TO JUMP · AGAIN TO DOUBLE JUMP</small></div>
+      <div class="game-bottom"><span><i class="status-dot"></i><span id="status">READY TO RUN</span></span><span id="route-status">THE HIGH ROAD IS OPTIONAL</span><button id="restart" type="button" aria-label="Restart run">↻ <span>RESTART</span></button></div>
+    </section>
+    <div class="controls"><span><kbd>SPACE</kbd> / <kbd>↑</kbd> jump + double jump</span><span><kbd>↓</kbd> duck</span><span><kbd>P</kbd> pause</span><span class="touch-hint">On touch: tap to jump · hold DUCK to duck</span><button id="duck" type="button">↓ DUCK</button></div>
+    <section class="field-notes" aria-label="Game features"><div class="notes-heading"><span>FIELD NOTES</span><span>FAMILIAR FEET. UNFAMILIAR TERRITORY.</span></div><div class="notes-grid"><article><span class="note-number">01</span><h3>A second chance.</h3><p>Tap jump again in the air. Two jumps, a little more possibility.</p></article><article><span class="note-number">02</span><h3>Small advantages.</h3><p>Catch a shield or slow time. A few seconds can go a long way.</p></article><article><span class="note-number">03</span><h3>Beyond the desert.</h3><p>Snowfields and volcanic ground. A familiar silhouette, a new horizon.</p></article><article><span class="note-number">04</span><h3>Look up. Look out.</h3><p>Double jump onto dotted ledges for bonus points. Watch for a bigger visitor every 600.</p></article></div></section>
+    <footer><span>BUILT FOR ONE MORE TRY.</span><span>NO DOWNLOADS. NO DRAMA. JUST JUMP.</span></footer>
+    <p id="announcer" class="sr-only" aria-live="polite"></p>
+  </main>
+  <script src="game.js"></script>
+</body>
+</html>
