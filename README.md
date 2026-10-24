@@ -1,6 +1,14 @@
 # Dino Jumper
 
-A small, dependency-free, classic-inspired dinosaur runner. Open `index.html` directly, or run `npm start` and visit http://localhost:3000.
+A small, dependency-free, classic-inspired dinosaur runner. Open `index.html` directly, or run `npm start` (or `node scripts/serve.js`) and visit http://localhost:3000.
+
+## Deploy to Vercel
+
+Import this repository with its root directory set to the repository root (leave the Root Directory field empty). The included `vercel.json` selects the **Other** framework preset, builds with `node scripts/build.js`, and publishes `dist/` as a static website. No environment variables or backend server are required.
+
+Push the source files, including `vercel.json` and `scripts/build.js`, then create a new deployment. If you set custom project overrides previously, use **Other**, build command **node scripts/build.js**, and output directory **dist**. Do not use the local preview server as Vercel's build command.
+
+To check the production output locally, run `npm run build` (or `node scripts/build.js`). This copies only the three browser assets into `dist/`; the preview server and tests are excluded from the deployment.
 
 ## Controls
 

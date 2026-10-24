@@ -4,7 +4,8 @@
   "private": true,
   "description": "A classic-inspired dinosaur runner with double jumps and optional adventures.",
   "scripts": {
-    "start": "node server.js",
+    "start": "node scripts/serve.js",
+    "build": "node scripts/build.js",
     "test": "node --test tests/game.test.js"
   }
 }
