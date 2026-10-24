@@ -5,7 +5,7 @@ const vm = require('node:vm');
 
 // Exercise the actual game loop in a minimal DOM. The test hook is injected into
 // the VM copy only, so the game does not expose mutable state in the browser.
-function setup(width = 1000, seed = 12345, storage = new Map()) {
+function setup(width = 1000, seed = 12345, storage = new Map(), withAchievements = false) {
   const elements = new Map();
   const draws = [];
   const context = new Proxy({}, { get: (_,name) => (...args) => { draws.push([name,...args]); } });
@@ -22,14 +22,19 @@ function setup(width = 1000, seed = 12345, storage = new Map()) {
     addEventListener(name, fn) { events[name] = fn; } };
   const sandbox = { document, window: { innerWidth: width, addEventListener() {} },
     localStorage: { getItem:key=>storage.get(key), setItem:(key,value)=>storage.set(key,value) }, matchMedia: () => ({ matches: false }),
-    requestAnimationFrame() {}, HTMLButtonElement: class {}, HTMLAnchorElement: class {} };
+    requestAnimationFrame() {}, setTimeout(){return 0;},clearTimeout(){}, HTMLButtonElement: class {}, HTMLAnchorElement: class {} };
   const randomMath=Object.create(Math);
   randomMath.random=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};
   sandbox.Math=randomMath;
   const source = fs.readFileSync(require.resolve('../game.js'), 'utf8')
     .replace('  renderJournal();updateHUD();requestAnimationFrame(frame);',
-      '  globalThis.api = {game,dino,reset,jump,update,togglePause,spawnRoute,spawnBoss,playerBox,draw,score,frame,spawnObstacle,bossAttack,launchAttack,pixelDino,DUCK_DINO,BIOMES,BOSSES,getBiome,continueExploring,journal,offerRevive,useRevive,chooseUpgrade,openUpgrade,startEvent,collectPickup,endRun,discover};');
-  vm.runInNewContext(source, sandbox);
+      '  globalThis.api = {game,dino,reset,jump,update,togglePause,spawnRoute,spawnBoss,playerBox,draw,score,frame,spawnObstacle,bossAttack,launchAttack,pixelDino,DUCK_DINO,BIOMES,BOSSES,UPGRADES,getBiome,continueExploring,journal,offerRevive,useRevive,chooseUpgrade,openUpgrade,startEvent,collectPickup,endRun,discover,updateHUD};');
+  vm.createContext(sandbox);
+  if(withAchievements) {
+    for(const file of ['achievements-data.js','achievement-engine.js'])vm.runInContext(fs.readFileSync(require.resolve('../'+file),'utf8'),sandbox);
+    sandbox.window.DinoAchievements=sandbox.DinoAchievements;
+  }
+  vm.runInContext(source, sandbox);
   const api = sandbox.api;
   api.reset();
   api.advance = seconds => {
@@ -38,7 +43,7 @@ function setup(width = 1000, seed = 12345, storage = new Map()) {
       api.update(1 / 120);
     }
   };
-  return { ...api, elements, events, draws, storage };
+  return { ...api, elements, events, draws, storage, achievements:sandbox.DinoAchievements };
 }
 
 test('two jumps are allowed, a third is blocked, and landing restores jumps', () => {
@@ -243,7 +248,7 @@ test('bird chooses six non-repeating multi-ball patterns with random cooldowns',
 
 test('exactly two revivals preserve progress, clear hazards, and cannot be bypassed', () => {
   const a=setup();a.spawnBoss(2);a.game.boss.age=3;a.game.bonus=125;
-  a.game.distance=14000;a.game.biome=1;a.game.lastUpgradeBiome=1;
+  a.game.distance=14000;a.game.biome=1;
   a.game.perks.magnet=2;
   const score=a.score(),age=a.game.boss.age;
   for(let i=0;i<2;i++) {
@@ -269,7 +274,7 @@ test('bosses arrive at fixed 1000-point milestones and fights are shorter than t
     a.game.distance=(level*1000-a.game.bonus)*10;
     a.update(.0001);
     assert.equal(a.game.boss.level,level);assert.equal(a.game.nextBoss,(level+1)*1000);
-    assert.equal(a.game.mode,'upgrade');a.chooseUpgrade('shell');
+    assert.equal(a.game.mode,'running');
     assert.ok(a.game.boss.duration<10);
     a.advance(a.game.boss.duration+.02);
     assert.equal(a.game.boss,null);
@@ -277,22 +282,23 @@ test('bosses arrive at fixed 1000-point milestones and fights are shorter than t
   assert.equal(a.game.mode,'won');assert.equal(a.journal.bosses.length,5);
 });
 
-test('biome upgrades pause the world, apply once, and resume the waiting boss', () => {
+test('biomes do not offer upgrades; upgrade choices pause, apply once, and resume', () => {
   const a=setup();a.game.distance=10000;a.update(.001);
-  assert.equal(a.game.mode,'upgrade');assert.equal(a.game.boss.level,1);
+  assert.equal(a.game.mode,'running');assert.equal(a.game.boss.level,1);
+  a.openUpgrade();a.game.upgradeOffers=['shell','magnet','fall'];
   const distance=a.game.distance;a.frame(1000);a.frame(2000);
   assert.equal(a.game.distance,distance);
   a.chooseUpgrade('shell');assert.equal(a.game.perks.shell,1);
   a.chooseUpgrade('shell');assert.equal(a.game.perks.shell,1);
   a.collectPickup({x:0,y:0,type:'shield'});assert.equal(a.game.shield,12);
   a.game.nextBoss=Infinity;a.advance(.05);assert.equal(a.game.mode,'running');
-  a.game.biome=2;a.openUpgrade();a.chooseUpgrade('fall');
+  a.game.biome=2;a.openUpgrade();a.game.upgradeOffers=['shell','magnet','fall'];a.chooseUpgrade('fall');
   a.jump();a.advance(.4);a.events.keydown({code:'ArrowDown',preventDefault(){}});
   const vy=a.dino.vy;a.update(.01);assert.ok(a.dino.vy-vy>30);
 });
 
 test('fossils and fragments grant rewards while the magnet collects nearby pickups', () => {
-  const a=setup();a.game.perks.fall=2;
+  const a=setup();a.game.perks.fortune=1;
   a.collectPickup({x:0,y:0,type:'fossil'});
   assert.equal(a.game.bonus,35);assert.equal(a.game.runFossils,1);assert.equal(a.journal.fossils,1);
   for(let i=0;i<3;i++)a.collectPickup({x:0,y:0,type:'fragment'});
@@ -384,7 +390,7 @@ test('all five boss volleys leave a physically reachable dodge on phone and desk
     for(const lead of [.18,.22,.26,.30,.34,.38,.42,.46]) {
       const a=setup(width);a.spawnBoss(level);a.game.invincible=0;
       a.game.distance=(speed-500)*32;a.game.speed=speed;
-      a.game.biome=Math.floor(a.score()/1000);a.game.lastUpgradeBiome=a.game.biome;
+      a.game.biome=Math.floor(a.score()/1000);
       a.game.boss.shot=Infinity;a.game.boss.volley=high?1:0;
       a.bossAttack(a.game.boss);
       const travel=(a.game.boss.x-a.dino.x)/Math.min(speed*1.12,(a.game.boss.x-a.dino.x)/.8);
@@ -400,4 +406,65 @@ test('all five boss volleys leave a physically reachable dodge on phone and desk
     }
     assert.ok(solved,`Boss ${level}, ${high?'high':'low'} volley, viewport ${width}, speed ${speed}`);
   }
+});
+
+test('upgrade events occur only after defeating bosses 2 and 4', () => {
+  const a=setup();a.game.nextBoss=Infinity;
+  for(let level=1;level<=5;level++) {
+    a.spawnBoss(level);a.game.boss.age=a.game.boss.duration-.001;a.update(.002);
+    if(level===2||level===4) {
+      assert.equal(a.game.mode,'upgrade');assert.equal(a.game.lastUpgradeBossCount,level);
+      assert.equal(a.game.upgradeOffers.length,3);assert.equal(new Set(a.game.upgradeOffers).size,3);
+      const chosen=a.game.upgradeOffers[0];a.chooseUpgrade(chosen);
+      assert.ok(a.game.perks[chosen]>0);assert.equal(a.game.mode,'running');
+      a.update(.001);assert.equal(a.game.mode,'running');
+    } else assert.equal(a.game.mode,level===5?'won':'running');
+  }
+});
+
+test('random offers draw from all nine perks, exclude maxed perks, and reject unoffered picks', () => {
+  const a=setup();assert.equal(a.UPGRADES.length,9);
+  const seen=new Set(),sets=new Set();
+  for(let i=0;i<40;i++) {
+    a.openUpgrade();assert.equal(a.game.upgradeOffers.length,3);
+    a.game.upgradeOffers.forEach(id=>seen.add(id));sets.add(a.game.upgradeOffers.join(','));
+    const notOffered=a.UPGRADES.find(p=>!a.game.upgradeOffers.includes(p.id));
+    a.chooseUpgrade(notOffered.id);assert.equal(a.game.mode,'upgrade');assert.equal(a.game.perks[notOffered.id],0);
+    a.chooseUpgrade('skip');
+  }
+  assert.equal(seen.size,9);assert.ok(sets.size>20);
+  a.game.perks.fall=1;a.game.perks.ward=1;a.game.perks.finder=1;
+  for(let i=0;i<15;i++) {a.openUpgrade();assert.ok(a.game.upgradeOffers.every(id=>!['fall','ward','finder'].includes(id)));a.chooseUpgrade('skip');}
+});
+
+test('new perk effects match their descriptions and active upgrades appear above the game', () => {
+  const a=setup();
+  a.game.perks.clock=2;a.collectPickup({type:'slow',x:0,y:0});assert.equal(a.game.slow,11);
+  a.game.perks.recovery=2;a.offerRevive();a.useRevive();assert.equal(a.game.invincible,4);assert.equal(a.game.revivesUsed,1);
+  a.game.perks.ward=1;a.spawnBoss(3);assert.ok(a.game.shield>=a.game.boss.duration);
+  a.game.perks.fortune=2;a.game.perks.route=1;a.game.routeActive=true;
+  const bonus=a.game.bonus;a.collectPickup({type:'fossil',x:0,y:0});assert.equal(a.game.bonus-bonus,60);
+  a.game.fragments=2;a.openUpgrade();a.game.upgradeOffers=['finder','shell','magnet'];a.chooseUpgrade('finder');
+  assert.equal(a.game.fragments,0);assert.ok(a.game.shield>0);
+  a.updateHUD();const text=a.elements.get('active-upgrades').textContent;
+  assert.match(text,/Longer Slow Motion Lv 2: 11s/);assert.match(text,/Boss Shield/);assert.match(text,/Easy Shell Repair/);
+  a.reset();a.updateHUD();assert.match(a.elements.get('active-upgrades').textContent,/None yet/);
+});
+
+test('Boss Shield lasts through slow-motion encounters and ends with the fight', () => {
+  const a=setup();a.game.nextBoss=Infinity;a.game.perks.ward=1;a.game.slow=13;a.spawnBoss(5);
+  a.game.boss.shot=Infinity;a.advance(10);
+  assert.ok(a.game.boss);assert.ok(a.game.shield>0);
+  a.advance(10);assert.equal(a.game.boss,null);assert.equal(a.game.shield,0);
+});
+
+test('real game actions feed the achievement tracker, including pickups, bosses, and revival',()=>{
+  const a=setup(1000,12345,new Map(),true),tracker=a.achievements;
+  assert.equal(tracker.state.stats.runs,1);assert.equal(tracker.state.stats.biomes,1);
+  a.jump();a.jump();assert.equal(tracker.state.stats.doubleJumps,1);
+  a.collectPickup({type:'fossil',x:100,y:100});assert.equal(tracker.state.stats.fossils,1);
+  a.spawnBoss(1);a.game.boss.age=a.game.boss.duration-.001;a.game.invincible=100;a.update(.002);
+  assert.equal(tracker.state.stats.boss1,1);assert.ok(tracker.state.flags.perfectBoss);
+  a.offerRevive();a.useRevive();assert.equal(tracker.state.stats.revives,1);
+  a.endRun();assert.equal(tracker.state.best.score,a.score());
 });

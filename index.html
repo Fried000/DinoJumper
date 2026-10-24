@@ -1,29 +1,9 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f7f7f7">
-  <title>Dino Jumper — A little further</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <main>
-    <header><a class="wordmark" href="./">DINO JUMPER<span>OFFLINE SPIRIT. NEW ADVENTURES.</span></a><button id="pause" type="button" aria-label="Pause game">Ⅱ</button></header>
-    <section class="intro"><p class="eyebrow">THE CLASSIC, WITH A FEW DETOURS</p><h1>A little further.</h1><p>Same little dino. A bigger world to jump through.</p></section>
-    <section class="game-shell" aria-label="Dinosaur runner game">
-      <div class="game-top"><span id="biome">01 / DESERT</span><span id="effect">JUST YOU AND THE HORIZON</span><span id="score">HI 00000 &nbsp; 00000</span></div>
-      <canvas id="game" width="1000" height="360" tabindex="0" aria-label="Dino runner. Space or up arrow to jump, press again to double jump. Down arrow to duck. P to pause."></canvas>
-      <div id="overlay" class="overlay"><p id="overlay-kicker">READY WHEN YOU ARE</p><h2 id="overlay-title">Let's go exploring.</h2><p id="overlay-text">Jump the cacti. Take the high road. See what's out there.</p><div id="upgrade-choices" hidden><button id="perk-shell" type="button"></button><button id="perk-magnet" type="button"></button><button id="perk-fall" type="button"></button></div><button id="start" type="button">START RUN <span>↗</span></button><button id="end-run" type="button" hidden>END THIS RUN</button><small id="overlay-help">SPACE / ↑ / TAP TO JUMP · AGAIN TO DOUBLE JUMP</small></div>
-      <div class="game-bottom"><span><i class="status-dot"></i><span id="status">READY TO RUN</span></span><span id="route-status">THE HIGH ROAD IS OPTIONAL</span><button id="restart" type="button" aria-label="Restart run">↻ <span>RESTART</span></button></div>
-    </section>
-    <div class="run-inventory" aria-label="Run inventory"><span id="eggs">EGGS 2 / 2</span><span id="fragments">FRAGMENTS 0 / 3</span><span id="fossils">FOSSILS 0</span><span id="next-boss">NEXT BOSS 1,000</span></div>
-    <div class="controls"><span><kbd>SPACE</kbd> / <kbd>↑</kbd> jump + double jump</span><span><kbd>↓</kbd> duck</span><span><kbd>P</kbd> pause</span><span class="touch-hint">On touch: tap to jump · hold DUCK to duck</span><button id="duck" type="button">↓ DUCK</button></div>
-    <section class="field-notes" aria-label="Game features"><div class="notes-heading"><span>FIELD NOTES</span><span>FAMILIAR FEET. UNFAMILIAR TERRITORY.</span></div><div class="notes-grid"><article><span class="note-number">01</span><h3>A second chance.</h3><p>Double jump above trouble. Two Dino Eggs bring you back when a run goes wrong.</p></article><article><span class="note-number">02</span><h3>Small advantages.</h3><p>Collect fossils and shell fragments. Pick a new perk at every biome.</p></article><article><span class="note-number">03</span><h3>Beyond the desert.</h3><p>48 named worlds, then an endless frontier. A new biome every 1,000 points.</p></article><article><span class="note-number">04</span><h3>Beat the gauntlet.</h3><p>A new boss every 1,000 points. Short fights, changing patterns, and a frontier to earn.</p></article></div></section>
-    <details id="journal"><summary>FIELD JOURNAL <span id="journal-count">YOUR DISCOVERIES</span></summary><p>Saved in this browser, even when a run ends. Opening the journal pauses your run.</p><div class="journal-grid"><section><h3>Worlds visited</h3><p id="journal-biomes"></p></section><section><h3>Bosses beaten</h3><p id="journal-bosses"></p></section><section><h3>Secrets & milestones</h3><p id="journal-secrets"></p></section></div><p id="journal-stats"></p></details>
-    <footer><span>BUILT FOR ONE MORE TRY.</span><span>NO DOWNLOADS. NO DRAMA. JUST JUMP.</span></footer>
-    <p id="announcer" class="sr-only" aria-live="polite"></p>
-  </main>
-  <script src="game.js"></script>
-</body>
-</html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f7f7f7"><title>Dino Jumper — A little further</title><link rel="stylesheet" href="style.css"></head>
+<body class="home-body"><main class="home-page">
+  <nav class="home-brand" aria-label="Brand">DINO JUMPER <span>EST. ONE MORE TRY</span></nav>
+  <section class="home-hero"><svg class="home-dino" viewBox="0 0 24 24" width="84" height="84" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M10 2h11v2h2v7h-9v2h6v2h-7v3h-2v3h3v2H9v-5H6v5H3v-2h2v-5H2v-3H0V8h2v3h2v2h4V7h2z"/><path fill="#f7f7f7" d="M18 4h2v2h-2z"/></svg><p class="eyebrow">A SMALL DINO. YOUR NEXT ADVENTURE.</p><h1>A little further.</h1></section>
+  <nav class="home-options" aria-label="Main menu"><a class="home-option home-primary" href="play.html"><span class="menu-number">01</span><strong>Play game</strong><span class="menu-arrow">↗</span></a><a class="home-option" href="instructions.html"><span class="menu-number">02</span><strong>Game rules</strong><small>Start here if you're new.</small><span class="menu-arrow">↗</span></a><a class="home-option" href="achievements.html"><span class="menu-number">03</span><strong>Achievements</strong><small>Explore your advancement map.</small><span class="menu-arrow">↗</span></a></nav>
+  <div class="home-records"><span id="home-best">PERSONAL BEST 00000</span><span id="home-achievements">0 / 48 ACHIEVEMENTS</span></div>
+</main><script src="achievements-data.js"></script><script src="achievement-engine.js"></script><script src="home.js"></script></body></html>

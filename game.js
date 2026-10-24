@@ -3,6 +3,14 @@
   const canvas = document.querySelector('#game');
   const ctx = canvas.getContext('2d');
   const $ = id => document.getElementById(id);
+  const achievement=window.DinoAchievements||{record(){},subscribe(){}};
+  let achievementNoticeTimer;
+  achievement.subscribe(items=>{
+    const notice=$('achievement-toast');if(!notice)return;
+    notice.textContent=`Achievement unlocked: ${items[0].name}${items.length>1?` +${items.length-1}`:''}`;
+    notice.hidden=false;clearTimeout(achievementNoticeTimer);
+    achievementNoticeTimer=setTimeout(()=>{notice.hidden=true;},3500);
+  });
   const W = window.innerWidth < 650 ? 600 : 1000, H = 360, GROUND = 292;
   canvas.width = W;
   const GRAVITY = 1850, JUMP = -660;
@@ -60,6 +68,18 @@
     { name: 'VOLCANIC DRAGON', duration: 8.5, interval: [.8,1.1], hint: 'FIRE STREAMS + LAVA RAIN · KEEP MOVING' },
     { name: 'SHADOW DINO', duration: 9, interval: [.8,1.05], hint: 'STACKED VOLLEYS · DELAYED ECHOES · FINAL RAGE' },
   ];
+  const UPGRADES = [
+    {id:'shell',name:'Longer Shield',max:4,describe:n=>`Shield pickups last ${10+(n-1)*2} → ${10+n*2} seconds. A shield still blocks one hit.`,summary:n=>`${10+n*2}s shields`},
+    {id:'magnet',name:'Pickup Magnet',max:4,describe:n=>`Automatically pull in nearby fossils, fragments, and power-ups. Reach: ${(n-1)*35} → ${n*35} pixels.`,summary:n=>`${n*35}px reach`},
+    {id:'fall',name:'Fast Fall',max:1,describe:()=>`Hold ↓ while falling to land faster. Your jump height and normal running speed stay the same.`,summary:()=>`hold ↓ to fall faster`},
+    {id:'fortune',name:'Valuable Fossils',max:3,describe:n=>`Each fossil gives ${25+(n-1)*10} → ${25+n*10} points, on either route.`,summary:n=>`${25+n*10} pts per fossil`},
+    {id:'clock',name:'Longer Slow Motion',max:3,describe:n=>`Clock pickups slow the world for ${7+(n-1)*2} → ${7+n*2} seconds. Your jumps stay responsive.`,summary:n=>`${7+n*2}s slow motion`},
+    {id:'recovery',name:'Safer Revival',max:2,describe:n=>`After hatching again, ignore hits for ${2+n-1} → ${2+n} seconds. You still get only two revivals per run.`,summary:n=>`${2+n}s revive protection`},
+    {id:'ward',name:'Boss Shield',max:1,describe:()=>`Start each future boss fight with a shield that blocks one hit. It lasts for the fight.`,summary:()=>`one-hit shield at boss entry`},
+    {id:'finder',name:'Easy Shell Repair',max:1,describe:()=>`Collect only 2 egg fragments instead of 3 to earn a shield. This does not add revivals.`,summary:()=>`2 fragments make a shield`},
+    {id:'route',name:'High Road Treasure',max:3,describe:n=>`Fossils collected on upper routes give ${((n-1)*15)} → ${n*15} extra points each. Stacks with Valuable Fossils.`,summary:n=>`+${n*15} pts on upper routes`},
+  ];
+  const newPerks=()=>Object.fromEntries(UPGRADES.map(p=>[p.id,0]));
   const DINO = [
     '000000001111111100',
     '000000011111111110',
@@ -107,8 +127,8 @@
     nextObstacle: 1.7, nextPickup: 7, nextRoute: 12, nextBoss: 1000, routeActive: false,
     shield: 0, slow: 0, invincible: 0, message: '', messageTimer: 0,
     biomeSign: 0, bossesDefeated: 0, warnings: [], lastObstacle: '', completed: false,
-    revivesUsed:0,fragments:0,runFossils:0,perks:{shell:0,magnet:0,fall:0},
-    lastUpgradeBiome:0,event:null,nextEvent:15,routeId:0,visitedRoute:-1,lastPattern:'' };
+    revivesUsed:0,fragments:0,runFossils:0,perks:newPerks(),upgradeOffers:[],wardActive:false,
+    lastUpgradeBossCount:0,event:null,nextEvent:15,routeId:0,visitedRoute:-1,lastPattern:'' };
   const dino = { x: 105, y: GROUND - 45, w: 45, h: 45, vy: 0, jumps: 0, grounded: true, duck: false };
   let last = null;
   let duckKey = false;
@@ -130,6 +150,7 @@
     if(!journal[category].includes(name)) {journal[category].push(name);saveJournal();}
   }
   function renderJournal() {
+    if(!$('journal-count'))return;
     $('journal-count').textContent=`${journal.biomes.length} WORLDS · ${journal.bosses.length}/5 BOSSES`;
     $('journal-biomes').textContent=journal.biomes.slice(-12).join('\n')||'Your first horizon is waiting.';
     $('journal-bosses').textContent=journal.bosses.join('\n')||'No bosses defeated yet.';
@@ -152,11 +173,12 @@
       nextObstacle: rand(.9,1.7), nextPickup: rand(5,8), nextRoute: rand(5,8), nextBoss: 1000, routeActive: false,
       shield: 0, slow: 0, invincible: 1, message: '', messageTimer: 0,
       biomeSign: 3.5, bossesDefeated: 0, warnings: [], lastObstacle: '', completed: false,
-      revivesUsed:0,fragments:0,runFossils:0,perks:{shell:0,magnet:0,fall:0},
-      lastUpgradeBiome:0,event:null,nextEvent:rand(5,8),routeId:0,visitedRoute:-1,lastPattern:'' });
+      revivesUsed:0,fragments:0,runFossils:0,perks:newPerks(),upgradeOffers:[],wardActive:false,
+      lastUpgradeBossCount:0,event:null,nextEvent:rand(5,8),routeId:0,visitedRoute:-1,lastPattern:'' });
     Object.assign(dino, { y: GROUND - 45, vy: 0, jumps: 0, grounded: true, duck: false });
     duckKey = false;
     jumpHeld=false;
+    achievement.record('start');achievement.record('biome',{index:0,name:activeTheme().name});
     journal.runs++;discover('biomes',activeTheme().name);saveJournal();
     $('upgrade-choices').hidden=true;$('end-run').hidden=true;
     $('overlay').hidden = true;
@@ -176,6 +198,7 @@
     dino.duck = false;
     dino.vy = dino.jumps === 0 ? JUMP : -610;
     dino.jumps++;
+    achievement.record('jump',{double:dino.jumps===2});
     dino.grounded = false;
     if (game.boss?.level === 5) {
       game.boss.echoes.push({ delay: game.boss.age > game.boss.duration/2 ? .45 : .8, y: dino.y });
@@ -194,6 +217,7 @@
     updateHUD();
   }
   function endRun() {
+    achievement.record('end',{score:score()});
     game.mode = 'over';
     high = Math.max(high, score());
     try { localStorage.setItem('dino-jumper-best', String(high)); } catch {}
@@ -215,8 +239,9 @@
   function useRevive() {
     if(game.mode!=='revive'||game.revivesUsed>=2)return;
     game.revivesUsed++;journal.revives++;
+    achievement.record('revive',{score:score(),boss:game.boss?.level,fraction:game.boss?game.boss.age/game.boss.duration:0});
     game.obstacles=[];game.platforms=[];game.warnings=[];game.routeActive=false;
-    game.invincible=2+Math.min(2,game.perks.shell*.5);
+    game.invincible=2+game.perks.recovery;
     game.nextObstacle=1.3;
     if(game.boss){game.boss.shot=1.4;game.boss.echoes=[];}
     Object.assign(dino,{y:GROUND-45,vy:0,jumps:0,grounded:true,duck:false});
@@ -226,22 +251,38 @@
     toast(`HATCHED AGAIN · ${2-game.revivesUsed} REVIVALS LEFT`);updateHUD();
   }
   function openUpgrade() {
-    game.lastUpgradeBiome=game.biome;game.mode='upgrade';duckKey=false;
-    showOverlay('A NEW BIOME. A SMALL ADVANTAGE.', 'Choose your edge.',
-      'One perk for this run. Your next boss waits until you choose.', 'SKIP UPGRADE');
-    $('perk-shell').textContent=`1 · SHELL · +2s shield / +0.5s revive (${game.perks.shell})`;
-    $('perk-magnet').textContent=`2 · MAGNET · +35px pickup reach (${game.perks.magnet})`;
-    $('perk-fall').textContent=game.perks.fall?'3 · FOSSIL BONUS · +10 points per fossil':'3 · FAST FALL · hold ↓ while descending';
+    const pool=UPGRADES.filter(p=>game.perks[p.id]<p.max);
+    for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]];}
+    game.upgradeOffers=pool.slice(0,3).map(p=>p.id);
+    if(!game.upgradeOffers.length)return;
+    game.lastUpgradeBossCount=game.bossesDefeated;game.mode='upgrade';duckKey=false;
+    showOverlay('TWO BOSSES DOWN. ONE UPGRADE TO CHOOSE.', 'Pick one upgrade.',
+      'These three choices are random. Your pick lasts until this run ends. The game is paused.', 'SKIP THIS PICK');
+    for(let i=0;i<3;i++) {
+      const perk=UPGRADES.find(p=>p.id===game.upgradeOffers[i]);
+      $('perk-option-'+(i+1)).hidden=!perk;
+      if(!perk)continue;
+      const next=game.perks[perk.id]+1;
+      $('perk-name-'+(i+1)).textContent=`${i+1} · ${perk.name}`;
+      $('perk-desc-'+(i+1)).textContent=perk.describe(next);
+      $('perk-level-'+(i+1)).textContent=game.perks[perk.id]?`UPGRADE TO LEVEL ${next} / ${perk.max}`:perk.max===1?'NEW ABILITY · ONE PICK TO UNLOCK':`NEW UPGRADE · LEVEL 1 / ${perk.max}`;
+    }
     $('upgrade-choices').hidden=false;
     $('overlay-help').textContent='CHOOSE 1 / 2 / 3 · OR SKIP';
     updateHUD();
   }
   function chooseUpgrade(kind) {
     if(game.mode!=='upgrade')return;
-    if(['shell','magnet','fall'].includes(kind))game.perks[kind]++;
+    if(kind!=='skip') {
+      const perk=UPGRADES.find(p=>p.id===kind);
+      if(!perk||!game.upgradeOffers.includes(kind)||game.perks[kind]>=perk.max)return;
+      game.perks[kind]++;
+      achievement.record('upgrade',{id:kind});
+      if(kind==='finder'&&game.fragments>=2) {game.fragments-=2;game.shield=10+game.perks.shell*2;achievement.record('repair');}
+    }
     game.mode='running';$('overlay').hidden=true;$('upgrade-choices').hidden=true;
     game.invincible=Math.max(game.invincible,.6);last=null;
-    if(kind!=='skip') {discover('secrets',`PERK · ${kind.toUpperCase()}`);toast('PERK EQUIPPED · BACK TO THE HORIZON');}
+    if(kind!=='skip') {discover('secrets',`PERK · ${UPGRADES.find(p=>p.id===kind).name}`);toast('UPGRADE EQUIPPED · SEE YOUR UPGRADES ABOVE THE GAME');}
     updateHUD();
   }
   function burst(x, y, count) {
@@ -250,8 +291,9 @@
   }
   function hurt(obstacle) {
     if (game.invincible > 0) return;
+    achievement.record('hit',{shield:game.shield>0,ward:game.wardActive&&Boolean(game.boss)});
     if (game.shield > 0) {
-      game.shield = 0; game.invincible = 1.4;
+      game.shield = 0; game.wardActive=false; game.invincible = 1.4;
       obstacle.hit = true;
       burst(dino.x+20, dino.y+20, 14);
       toast('SHIELD SAVED YOU');
@@ -295,6 +337,8 @@
     game.pickups = [];
     game.warnings = [];
     game.event=null;game.nextEvent=rand(3,5);
+    if(game.perks.ward) {game.shield=Math.max(game.shield,spec.duration+1);game.wardActive=true;}
+    achievement.record('bossStart',{level,ward:Boolean(game.perks.ward)});
     game.routeActive = false;
     toast(`BOSS ${level} · ${spec.name} · SURVIVE TO WIN`);
     if(level===4) {
@@ -383,21 +427,26 @@
     if(kind==='fireflies')for(let i=0;i<5;i++)game.pickups.push({x:W+60+i*115,y:GROUND-50-i%2*25,w:19,h:19,type:'fossil'});
   }
   function collectPickup(pickup) {
+    const points=25+(pickup.type==='fossil'?game.perks.fortune*10+(game.routeActive?game.perks.route*15:0):0);
+    achievement.record('pickup',{type:pickup.type,points,score:score()+(['fossil','bonus'].includes(pickup.type)?points:0),upper:game.routeActive,fireflies:game.event?.kind==='fireflies'});
     pickup.collected=true;burst(pickup.x,pickup.y,8);
     if(pickup.type==='shield') {game.shield=Math.min(18,10+game.perks.shell*2);toast('SHIELD · ONE FREE HIT');}
-    else if(pickup.type==='slow') {game.slow=7;toast('SLOW TIME · 7 SECONDS');}
+    else if(pickup.type==='slow') {game.slow=7+game.perks.clock*2;toast(`SLOW TIME · ${game.slow} SECONDS`);}
     else if(pickup.type==='fragment') {
       game.fragments++;
-      if(game.fragments>=3) {
+      const needed=game.perks.finder?2:3;
+      if(game.fragments>=needed) {
         game.fragments=0;game.shield=Math.min(18,10+game.perks.shell*2);
-        discover('secrets','THREE FRAGMENTS · REBUILT SHELL');toast('3 FRAGMENTS · BONUS SHIELD');
-      }else toast(`EGG FRAGMENT ${game.fragments}/3 · THREE MAKE A SHIELD`);
+        achievement.record('repair');
+        discover('secrets','EGG FRAGMENTS · REBUILT SHELL');toast(`${needed} FRAGMENTS · BONUS SHIELD`);
+      }else toast(`EGG FRAGMENT ${game.fragments}/${needed} · ${needed} MAKE A SHIELD`);
     } else {
-      game.bonus+=25+(pickup.type==='fossil'?Math.max(0,game.perks.fall-1)*10:0);
+      game.bonus+=25+(pickup.type==='fossil'?game.perks.fortune*10+(game.routeActive?game.perks.route*15:0):0);
       if(pickup.type==='fossil') {game.runFossils++;journal.fossils++;saveJournal();}
     }
   }
   function winRun() {
+    achievement.record('win',{score:score()});
     game.completed=true;game.nextBoss=Infinity;game.mode='won';
     high=Math.max(high,score());
     try {localStorage.setItem('dino-jumper-best',String(high));}catch{}
@@ -416,8 +465,9 @@
     game.distance += game.speed * worldDt;
     game.speed = Math.min(MAX_SPEED,BASE_SPEED+game.distance/32);
     for (const key of ['shield','slow','invincible','messageTimer','biomeSign']) game[key] = Math.max(0,game[key]-dt);
+    if(game.wardActive&&game.boss&&game.shield>0)game.shield=Math.max(game.shield,game.boss.duration-game.boss.age+1);
     const biome = Math.floor(score()/1000);
-    if (biome !== game.biome) { game.biome = biome; game.biomeSign=3.5;discover('biomes',activeTheme().name);toast(`NEW BIOME · ${activeTheme().name}`); }
+    if (biome !== game.biome) { game.biome = biome; game.biomeSign=3.5;achievement.record('biome',{index:biome,name:activeTheme().name});discover('biomes',activeTheme().name);toast(`NEW BIOME · ${activeTheme().name}`); }
     dino.duck = duckKey && dino.grounded;
     const oldBottom = dino.y+dino.h;
     dino.vy += GRAVITY*dt*(duckKey && !dino.grounded && game.perks.fall>0 && dino.vy>0?2.4:1);
@@ -435,8 +485,9 @@
         if(platform.crumble===null)platform.crumble=.85;
         if(platform.routeId!==undefined && game.visitedRoute!==platform.routeId) {
           game.visitedRoute=platform.routeId;discover('secrets','SECRET ROUTE · THE HIGH ROAD');
+          achievement.record('route');
         }
-        if (!game.routeActive) { game.routeActive = true; toast('THE HIGH ROAD · +25 PER DIAMOND'); }
+        if (!game.routeActive) { game.routeActive = true; toast('UPPER ROUTE'); }
       }
     }
     if (dino.y+dino.h >= GROUND) {
@@ -450,7 +501,6 @@
       game.nextBoss += 1000;
       spawnBoss();
     }
-    if(game.biome>game.lastUpgradeBiome) {openUpgrade();return;}
     if (game.boss) {
       const boss = game.boss;
       boss.age += worldDt;
@@ -476,16 +526,19 @@
       game.warnings=game.warnings.filter(w=>w.delay>0);
       if (boss.age >= boss.duration) {
         const reward=boss.level*50;
+        achievement.record('bossWin',{level:boss.level,score:score()+reward});
         game.boss = null; game.bonus += reward;game.bossesDefeated++;
+        if(game.wardActive){game.shield=0;game.wardActive=false;}
         discover('bosses',boss.name);
         game.obstacles = []; game.warnings=[]; game.platforms=[];game.nextObstacle = rand(1.4,2);
         game.nextRoute = Math.max(3, game.nextRoute);
         toast(`BOSS ${boss.level} OUTRUN · +${reward}`);
         if(game.bossesDefeated===5)winRun();
+        else if(game.bossesDefeated%2===0&&game.lastUpgradeBossCount<game.bossesDefeated) {openUpgrade();return;}
       }
     } else {
       game.nextEvent-=worldDt;
-      if(game.event) {game.event.left-=worldDt;if(game.event.left<=0)game.event=null;}
+      if(game.event) {game.event.left-=worldDt;if(game.event.left<=0){achievement.record('eventWin',{kind:game.event.kind});game.event=null;}}
       if(game.nextEvent<=0&&!game.event){startEvent();game.nextEvent=rand(16,24);}
       game.nextObstacle -= worldDt;
       if (game.nextObstacle<=0) { spawnObstacle(); game.nextObstacle=rand(.78,1.35); }
@@ -505,8 +558,10 @@
       if(obstacle.targetY!==undefined)obstacle.y=obstacle.startY+(obstacle.targetY-obstacle.startY)*Math.min(1,obstacle.age/.3);
       if(obstacle.bounce)obstacle.y=GROUND-obstacle.h-Math.abs(Math.sin(obstacle.age*obstacle.frequency))*obstacle.bounce;
       if(obstacle.vy)obstacle.y+=obstacle.vy*worldDt;
+      if(!obstacle.counted&&!obstacle.hit&&!obstacle.touched&&obstacle.x+obstacle.w<dino.x){obstacle.counted=true;achievement.record('dodge');}
       const hitbox = {x:obstacle.x+3,y:obstacle.y+3,w:obstacle.w-6,h:obstacle.h-5};
       if (!obstacle.hit && intersects(box,hitbox)) {
+        obstacle.touched=true;
         hurt(obstacle);
         if (game.mode !== 'running') return;
       }
@@ -525,6 +580,7 @@
     game.pickups=game.pickups.filter(p=>p.x+p.w>0&&!p.collected);
     for (const p of game.particles) { p.x+=p.vx*dt-dx/2; p.y+=p.vy*dt; p.vy+=300*dt; p.life-=dt; }
     game.particles=game.particles.filter(p=>p.life>0);
+    achievement.record('tick',{dt,score:score(),speed:game.speed,fastFall:duckKey&&!dino.grounded&&dino.vy>0&&game.perks.fall>0});
   }
   function updateHUD() {
     const theme = activeTheme();
@@ -534,12 +590,16 @@
     const effects = [];
     if (game.shield>0) effects.push(`SHIELD ${Math.ceil(game.shield)}s`);
     if (game.slow>0) effects.push(`SLOW ${Math.ceil(game.slow)}s`);
-    $('effect').textContent = effects.join(' / ') || game.event?.name || 'JUST YOU AND THE HORIZON';
-    $('route-status').textContent = game.routeActive?'HIGH ROAD · FOSSILS + FRAGMENTS':'GROUND OR HIGH ROAD · YOUR CHOICE';
+    $('effect').textContent = effects.join(' / ') || game.event?.name || '';
+    $('route-status').textContent = game.routeActive?'UPPER ROUTE':'';
     $('eggs').textContent=`EGGS ${2-game.revivesUsed} / 2`;
-    $('fragments').textContent=`FRAGMENTS ${game.fragments} / 3`;
+    $('fragments').textContent=`FRAGMENTS ${game.fragments} / ${game.perks.finder?2:3}`;
     $('fossils').textContent=`FOSSILS ${game.runFossils}`;
     $('next-boss').textContent=game.completed?'ALL BOSSES BEATEN':`NEXT BOSS ${game.nextBoss.toLocaleString('en-US')}`;
+    const owned=UPGRADES.filter(p=>game.perks[p.id]).map(p=>`${p.name}${p.max>1?' Lv '+game.perks[p.id]:''}: ${p.summary(game.perks[p.id])}`).join('  •  ');
+    const label=owned||'None yet — choose an upgrade after bosses 2 and 4.';
+    if($('active-upgrades').textContent!==label)$('active-upgrades').textContent=label;
+    const upgradeBar=document.querySelector('.equipped-upgrades');if(upgradeBar)upgradeBar.hidden=!owned;
     document.querySelector('.game-shell').style.setProperty('--game-bg',theme.bg);
   }
   function pixelDino(x,y,scale=2,duck=false,animate=true) {
@@ -850,13 +910,13 @@
   }
   $('start').addEventListener('click',()=>{if(game.mode==='paused')togglePause();else if(game.mode==='won')continueExploring();else if(game.mode==='revive')useRevive();else if(game.mode==='upgrade')chooseUpgrade('skip');else reset();canvas.focus({preventScroll:true});});
   $('end-run').addEventListener('click',endRun);
-  for(const kind of ['shell','magnet','fall'])$('perk-'+kind).addEventListener('click',()=>{chooseUpgrade(kind);canvas.focus({preventScroll:true});});
-  $('journal').addEventListener('toggle',()=>{if($('journal').open&&game.mode==='running')togglePause();});
+  for(let i=0;i<3;i++)$('perk-option-'+(i+1)).addEventListener('click',()=>{chooseUpgrade(game.upgradeOffers[i]);canvas.focus({preventScroll:true});});
+  $('journal')?.addEventListener('toggle',()=>{if($('journal').open&&game.mode==='running')togglePause();});
   $('restart').addEventListener('click',()=>{reset();canvas.focus({preventScroll:true});});
   $('pause').addEventListener('click',togglePause);
   document.addEventListener('keydown',e=>{
     if(game.mode==='upgrade'&&['Digit1','Digit2','Digit3'].includes(e.code)) {
-      e.preventDefault();chooseUpgrade({Digit1:'shell',Digit2:'magnet',Digit3:'fall'}[e.code]);return;
+      e.preventDefault();chooseUpgrade(game.upgradeOffers[Number(e.code.slice(-1))-1]);return;
     }
     if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW') {
       if(e.target instanceof HTMLButtonElement || e.target instanceof HTMLAnchorElement)return;
