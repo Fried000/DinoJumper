@@ -65,8 +65,8 @@
   const BOSSES = [
     { name: 'BALL-SPITTING BIRD', duration: 7, interval: [.95,1.25], hint: 'MULTI-BALL VOLLEYS · LOW: JUMP / HIGH: DUCK' },
     { name: 'PRISM TRICERATOPS', duration: 7.5, interval: [1.5,1.75], hint: 'LASER WARNING → DUCK / JUMP / DOUBLE JUMP · X TO PHASE' },
-    { name: 'QUARRY T. REX', duration: 8, interval: [1.65,1.9], hint: 'READ THE ROCKS · LOW: JUMP / HIGH: DUCK / TALL: DOUBLE JUMP' },
-    { name: 'VOLCANIC DRAGON', duration: 8.5, interval: [.8,1.1], hint: 'FIRE STREAMS + LAVA RAIN · KEEP MOVING' },
+    { name: 'QUARRY T. REX', duration: 8, interval: [1.65,1.9], hint: 'JUMP ROCKS → DUCK THEIR RETURN · TOWERS: DOUBLE JUMP' },
+    { name: 'VOLCANIC DRAGON', duration: 8.5, interval: [2.5,2.7], hint: 'LAVA: JUMP ON STONE · ASH CEILING: CROUCH ON GROUND' },
     { name: 'SHADOW DINO', duration: 9, interval: [.8,1.05], hint: 'STACKED VOLLEYS · DELAYED ECHOES · FINAL RAGE' },
   ];
   const UPGRADES = [
@@ -362,9 +362,6 @@
     achievement.record('bossStart',{level,ward:Boolean(game.perks.ward)});
     game.routeActive = false;
     toast(`BOSS ${level} · ${spec.name} · SURVIVE TO WIN`);
-    if(level===4) {
-      for(let i=0;i<6;i++) game.platforms.push({x:W+120+i*260,y:GROUND-105,w:155,h:8,crumble:null});
-    }
   }
   function warnAttack(type, high = false, offset = 0, options = {}) {
     game.warnings.push({ type, high, delay: .45+offset, ...options, label:
@@ -381,7 +378,13 @@
     if(type==='siege-rock') {
       const height=warning.height;
       game.obstacles.push({x:boss.x,y:warning.laneY??GROUND-height,w:warning.width||34,h:height,
-        vx:Math.min(game.speed,(boss.x-dino.x)/1.05),type:'siege-rock',hit:false,age:0,biome:game.biome});return;
+        vx:Math.min(game.speed,(boss.x-dino.x)/1.05),recall:warning.recall,stage:'out',type:'siege-rock',hit:false,age:0,biome:game.biome});return;
+    }
+    if(type==='terrain') {
+      const lava=warning.kind==='lava';
+      game.obstacles.push({x:0,y:lava?GROUND-26:0,w:W,h:lava?H-GROUND+26:GROUND-26,type:'terrain',kind:warning.kind,ttl:lava?.85:.45,age:0,hit:false,biome:game.biome});
+      if(lava)game.platforms.push({x:dino.x-26,y:GROUND-86,w:140,h:8,fixed:true,expires:1.25});
+      return;
     }
     const size = type==='charge'?48:type==='boulder'?Math.round(rand(25,34)):22;
     const y = warning.laneY ?? GROUND-(high?53:size);
@@ -435,15 +438,14 @@
       const height=action==='jump'||action==='double'?GROUND-y:8;
       game.warnings.push({type:'laser',action,laneY:y,height,delay:.95,label:action==='double'?'LASER CURTAIN · DOUBLE JUMP':action==='jump'?'LOW LASER CURTAIN · JUMP':action==='duck'?'HEAD-HEIGHT LASER · DUCK':'SCATTER LASER · READ THE LINE'});
     } else if(boss.level===3) {
-      const choices=['ground','high','tower'].filter(p=>p!==boss.lastPattern);
+      const choices=['ground','tower'].filter(p=>p!==boss.lastPattern);
       const pattern=choices[Math.floor(Math.random()*choices.length)];boss.lastPattern=pattern;
       const height=pattern==='tower'?rand(132,146):pattern==='high'?20:rand(35,52);
       game.warnings.push({type:'siege-rock',action:pattern,height,laneY:pattern==='high'?rand(GROUND-52,GROUND-46):GROUND-height,width:pattern==='tower'?34:40,
-        delay:.7,label:pattern==='tower'?'ROCK TOWER · DOUBLE JUMP':pattern==='high'?'HIGH ROCK · DUCK':'GROUND ROCK · JUMP'});
+        recall:pattern==='ground',delay:.7,label:pattern==='tower'?'ROCK TOWER · DOUBLE JUMP':'MAGNET ROCK · JUMP, THEN DUCK RETURN'});
     } else if(boss.level===4) {
-      if(high)train('fireball',3,true);
-      else {train('fireball',3);warnAttack('rain');}
-      ceiling();
+      const kind=high?'ash':'lava';
+      game.warnings.push({type:'terrain',kind,delay:1.05,laneY:high?GROUND-26:GROUND-26,label:high?'ASH CEILING · LAND AND CROUCH':'FLOOR ERUPTION · JUMP ON THE STONE'});
     } else {
       if(high) {train('ball',3,true);ceiling();}
       else {
@@ -516,7 +518,8 @@
     dino.grounded = false;
     const dx = game.speed*worldDt;
     for (const platform of game.platforms) {
-      platform.x -= dx;
+      if(!platform.fixed)platform.x -= dx;
+      if(platform.expires!==undefined){platform.expires-=worldDt;if(platform.expires<=0)continue;}
       if(platform.crumble!==undefined && platform.crumble!==null) {
         platform.crumble-=dt;if(platform.crumble<=0)continue;
       }
@@ -528,7 +531,7 @@
           game.visitedRoute=platform.routeId;discover('secrets','SECRET ROUTE · THE HIGH ROAD');
           achievement.record('route');
         }
-        if (!game.routeActive) { game.routeActive = true; toast('UPPER ROUTE'); }
+        if (!platform.fixed&&!game.routeActive) { game.routeActive = true; toast('UPPER ROUTE'); }
       }
     }
     if (dino.y+dino.h >= GROUND) {
@@ -536,7 +539,7 @@
       game.routeActive = false;
     }
     if (dino.grounded) dino.duck = duckKey;
-    game.platforms = game.platforms.filter(p=>p.x+p.w>0 && (p.crumble===undefined||p.crumble===null||p.crumble>0));
+    game.platforms = game.platforms.filter(p=>p.x+p.w>0 && (p.expires===undefined||p.expires>0) && (p.crumble===undefined||p.crumble===null||p.crumble>0));
 
     if (!game.boss && !game.completed && score() >= game.nextBoss && !game.obstacles.some(o=>!o.hit&&o.x+o.w>0)) {
       game.nextBoss += 1000;
@@ -555,7 +558,8 @@
         }
       }
       boss.echoes=boss.echoes.filter(e=>!e.sent);
-      if (boss.shot <= 0 && boss.age < boss.duration-(boss.level===2?1.05:2)) {
+      const recallBusy=boss.level===3&&game.obstacles.some(o=>o.recall&&(o.stage!=='return'||o.x<dino.x+90));
+      if (boss.shot <= 0 && !recallBusy && boss.age < boss.duration-(boss.level===2?1.05:2)) {
         bossAttack(boss);
         const rage=boss.level===5 && boss.age>boss.duration/2;
         boss.shot=rand(...boss.interval)*(rage?.9:1);
@@ -594,8 +598,15 @@
     }
     const box = playerBox();
     for (const obstacle of game.obstacles) {
-      if(obstacle.type==='laser'){obstacle.ttl-=worldDt;if(obstacle.ttl<=0)continue;}
-      else obstacle.x -= (obstacle.vx||game.speed)*worldDt;
+      if(obstacle.type==='laser'||obstacle.type==='terrain'){obstacle.ttl-=worldDt;if(obstacle.ttl<=0)continue;}
+      else if(obstacle.recall&&obstacle.stage==='windup'){
+        obstacle.windup-=worldDt;
+        if(obstacle.windup<=0)obstacle.stage='return';
+      } else obstacle.x += (obstacle.stage==='return'?1:-1)*(obstacle.vx||game.speed)*worldDt;
+      if(obstacle.recall&&obstacle.stage==='out'&&obstacle.x+obstacle.w<dino.x-35){
+        obstacle.stage='windup';obstacle.windup=.65;obstacle.y=GROUND-53;obstacle.h=22;
+        toast('MAGNET RECALL · DUCK THE RETURN');
+      }
       obstacle.age=(obstacle.age||0)+worldDt;
       if(obstacle.targetY!==undefined)obstacle.y=obstacle.startY+(obstacle.targetY-obstacle.startY)*Math.min(1,obstacle.age/.3);
       if(obstacle.bounce)obstacle.y=GROUND-obstacle.h-Math.abs(Math.sin(obstacle.age*obstacle.frequency))*obstacle.bounce;
@@ -608,7 +619,7 @@
         if (game.mode !== 'running') return;
       }
     }
-    game.obstacles = game.obstacles.filter(o=>o.x+o.w>0 && o.y<H+50 && !o.hit && (o.ttl===undefined||o.ttl>0));
+    game.obstacles = game.obstacles.filter(o=>(o.recall||o.x+o.w>0) && (o.stage!=='return'||o.x<W) && o.y<H+50 && !o.hit && (o.ttl===undefined||o.ttl>0));
     for (const pickup of game.pickups) {
       pickup.x -= dx;
       const radius=Math.min(140,game.perks.magnet*35);
@@ -635,9 +646,13 @@
     if (game.slow>0) effects.push(`SLOW ${Math.ceil(game.slow)}s`);
     $('effect').textContent = effects.join(' / ') || (borderDistance()<=BORDER_APPROACH?`NEXT: ${getBiome(game.biome+1).name}`:game.event?.name||'');
     $('route-status').textContent = game.routeActive?'UPPER ROUTE':'';
-    $('eggs').textContent=`EGGS ${2-game.revivesUsed} / 2`;
-    $('fragments').textContent=`FRAGMENTS ${game.fragments} / ${game.perks.finder?2:3}`;
-    $('fossils').textContent=`FOSSILS ${game.runFossils}`;
+    $('eggs').textContent=`${2-game.revivesUsed} / 2 revives left`;
+    $('fragments').textContent=`${game.fragments} / ${game.perks.finder?2:3} pieces`;
+    $('fragment-meter').max=game.perks.finder?2:3;$('fragment-meter').value=game.fragments;
+    $('fossils').textContent=`${game.runFossils} collected`;
+    $('fossil-value').textContent=`+${25+game.perks.fortune*10+(game.routeActive?game.perks.route*15:0)} points each`;
+    $('shield-timer').textContent=game.shield>0?`${game.wardActive?'Boss fight':game.shield.toFixed(1)+'s'} · 1 hit`:'No shield';
+    $('slow-timer').textContent=game.slow>0?`${game.slow.toFixed(1)}s left`:'Not active';
     $('next-boss').textContent=game.completed?'ALL BOSSES BEATEN':`NEXT BOSS ${game.nextBoss.toLocaleString('en-US')}`;
     const owned=UPGRADES.filter(p=>game.perks[p.id]).map(p=>`${p.name}${p.max>1?' Lv '+game.perks[p.id]:''}: ${p.summary(game.perks[p.id])}`).join('  •  ');
     const label=owned||'None yet — choose an upgrade after bosses 2 and 4.';
@@ -823,17 +838,29 @@
     else if(boss.level===3) {
       ctx.translate(x+70,GROUND);ctx.scale(-1,1);pixelDino(0,-45,4,false,false);
     } else if(boss.level===4) {
-      bird({x,y:boss.y+Math.sin(game.time*3)*12},true);
-      ctx.fillRect(x+60,boss.y-12,6,18);ctx.fillRect(x+72,boss.y-6,6,15);
-      ctx.fillRect(x-20,boss.y+30,35,7);
+      // A coiled stone dragon channels its attacks into the arena.
+      const y=GROUND-105;
+      ctx.fillRect(x+25,y+30,65,60);ctx.fillRect(x+65,y-8,23,65);
+      ctx.fillRect(x-8,y,80,25);ctx.fillRect(x-17,y+10,20,10);
+      ctx.fillRect(x+13,y-17,8,22);ctx.fillRect(x+40,y-23,8,28);
+      ctx.fillRect(x+10,y+80,70,12);ctx.fillRect(x+85,y+60,22,9);
+      ctx.fillStyle=activeTheme().bg;ctx.fillRect(x+7,y+6,5,5);ctx.fillRect(x+39,y+48,31,27);
     } else {
       ctx.globalAlpha=.7;ctx.translate(x+70,GROUND);ctx.scale(-1,1);pixelDino(0,-45,3,false,false);
       ctx.globalAlpha=.2;pixelDino(12,-43,3,false,false);
     }ctx.restore();
   }
   function drawHazard(o,theme) {
+    if(o.type==='terrain'){
+      ctx.save();ctx.fillStyle=o.kind==='lava'?'#b7663d':'#66616c';ctx.globalAlpha=.22;
+      ctx.fillRect(o.x,o.y,o.w,o.h);ctx.globalAlpha=.8;
+      const edge=o.kind==='lava'?o.y:o.h;
+      for(let x=0;x<W;x+=24)ctx.fillRect(x,edge+(o.kind==='lava'?0:-6),16,6);
+      ctx.restore();return;
+    }
     if(o.type==='laser'){drawLaser(o,false);return;}
     if(o.type==='siege-rock'){
+      if(o.recall){ctx.save();ctx.strokeStyle='#a5754f';ctx.setLineDash([4,7]);ctx.beginPath();ctx.moveTo(o.x+o.w/2,o.y+o.h/2);ctx.lineTo(game.boss?.x??W,GROUND-65);ctx.stroke();ctx.restore();}
       for(let row=0;row<o.h;row+=22){ctx.fillRect(Math.round(o.x)+(Math.floor(row/22)%2)*3,Math.round(o.y+row),o.w-3,Math.min(20,o.h-row));}
       ctx.strokeStyle=theme.bg;ctx.beginPath();ctx.moveTo(o.x+12,o.y+8);ctx.lineTo(o.x+o.w-8,o.y+o.h-8);ctx.stroke();ctx.strokeStyle=theme.ink;return;
     }
@@ -920,6 +947,7 @@
       ctx.globalAlpha=p.crumble!==undefined && p.crumble!==null?Math.max(.2,p.crumble/.85):1;
       ctx.setLineDash([5,4]);ctx.strokeRect(Math.round(p.x),p.y,p.w,5);ctx.setLineDash([]);
       ctx.fillStyle=theme.faint;ctx.fillRect(p.x,p.y+6,p.w,3);ctx.fillStyle=theme.ink;
+      if(p.fixed){ctx.fillRect(p.x,p.y,p.w,8);for(let x=p.x+12;x<p.x+p.w;x+=25)ctx.clearRect(x,p.y+2,2,4);}
     }ctx.globalAlpha=1;
     for(const o of game.obstacles){const ownTheme=getBiome(o.biome??game.biome);ctx.fillStyle=ownTheme.ink;ctx.strokeStyle=ownTheme.ink;drawHazard(o,ownTheme);}
     ctx.fillStyle=theme.ink;ctx.strokeStyle=theme.ink;
@@ -935,6 +963,11 @@
       const warning=game.warnings[0];
       if(warning) {
         if(warning.type==='laser')drawLaser(warning,true);
+        if(warning.type==='terrain'){
+          ctx.save();ctx.fillStyle=warning.kind==='lava'?'#b7663d':'#66616c';ctx.globalAlpha=.08;
+          ctx.fillRect(0,warning.kind==='lava'?GROUND-26:0,W,warning.kind==='lava'?H-GROUND+26:GROUND-26);ctx.restore();
+          if(warning.kind==='lava'){ctx.strokeRect(dino.x-26,GROUND-86,140,8);ctx.font='9px Consolas,monospace';ctx.textAlign='left';ctx.fillText('SAFE STONE ↑',dino.x-24,GROUND-94);}
+        }
         ctx.textAlign='center';ctx.font='bold 12px Consolas,monospace';
         ctx.fillText(`! ${warning.label} !`,W/2,145);
         const lane=warning.laneY??(warning.high?GROUND-42:GROUND-12);

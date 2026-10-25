@@ -200,7 +200,7 @@ test('speed starts at 500, rises quickly, and is capped at 920', () => {
 
 test('all five bosses have distinct attacks, warnings, increasing duration and rewards', () => {
   const a=setup();
-  const expected=[['ball'],['laser'],['siege-rock'],['rain','fireball'],['boulder','fireball','ball']];
+  const expected=[['ball'],['laser'],['siege-rock'],['terrain'],['boulder','fireball','ball']];
   let previousDuration=0;
   for(let level=1;level<=5;level++) {
     a.game.nextBoss=Infinity;a.spawnBoss();const boss=a.game.boss;
@@ -351,7 +351,7 @@ test('high bird balls hit standing dino but clear its dedicated crouch sprite', 
   assert.ok(a.DUCK_DINO.every(row=>row.length===24));
 });
 
-test('boulders bounce, lava falls, dragon platforms crumble and shadow copies jumps', () => {
+test('boulders bounce, falling hazards move, ledges crumble and shadow copies jumps', () => {
   const a=setup();a.spawnBoss(5);a.launchAttack({type:'boulder'});
   const rock=a.game.obstacles[0],initialY=rock.y;a.advance(.15);assert.notEqual(rock.y,initialY);
   a.spawnBoss(4);a.launchAttack({type:'rain'});
@@ -362,6 +362,48 @@ test('boulders bounce, lava falls, dragon platforms crumble and shadow copies ju
   assert.equal(a.game.platforms.length,0);assert.ok(a.dino.y>132);
   a.spawnBoss(5);a.dino.jumps=0;a.jump();assert.equal(a.game.boss.echoes.length,1);
   a.advance(.82);assert.ok(a.game.warnings.some(w=>w.type==='echo'));
+});
+
+test('inventory explains revives, shield fragments, fossil value and live timers',()=>{
+  const a=setup();a.game.revivesUsed=1;a.game.fragments=1;a.game.runFossils=4;
+  a.game.shield=3.25;a.game.slow=2.5;a.game.perks.finder=1;a.game.perks.fortune=2;a.updateHUD();
+  assert.equal(a.elements.get('eggs').textContent,'1 / 2 revives left');
+  assert.equal(a.elements.get('fragments').textContent,'1 / 2 pieces');
+  assert.equal(a.elements.get('fragment-meter').value,1);assert.equal(a.elements.get('fragment-meter').max,2);
+  assert.equal(a.elements.get('fossils').textContent,'4 collected');assert.equal(a.elements.get('fossil-value').textContent,'+45 points each');
+  assert.equal(a.elements.get('shield-timer').textContent,'3.3s · 1 hit');assert.equal(a.elements.get('slow-timer').textContent,'2.5s left');
+});
+
+test('dragon arena pulses are survivable using the stone and crouch without protection',()=>{
+  for(const width of [390,1000])for(const speed of [500,920])for(const seed of [1,42,12345,99999]) {
+    const a=setup(width,seed);a.spawnBoss(4);a.game.bossesDefeated=3;a.game.nextBoss=Infinity;
+    a.game.revivesUsed=2;a.game.invincible=0;a.game.distance=(speed-500)*32;a.game.speed=speed;
+    const seen=new Set(),plans=[];let time=0,landed=false;
+    while(a.game.boss&&a.game.mode==='running'&&time<10){
+      for(const warning of a.game.warnings)if(!seen.has(warning)){
+        seen.add(warning);assert.equal(warning.type,'terrain');plans.push({kind:warning.kind,impact:time+warning.delay,jumped:false});
+      }
+      const duck=plans.some(p=>p.kind==='ash'&&time>=p.impact-.3&&time<=p.impact+.55);
+      a.events[duck?'keydown':'keyup']({code:'ArrowDown',preventDefault(){}});
+      for(const p of plans)if(p.kind==='lava'&&!p.jumped&&time>=p.impact-.3){a.jump();p.jumped=true;}
+      a.update(1/120);time+=1/120;
+      if(a.dino.grounded&&a.dino.y===161)landed=true;
+      assert.ok(a.game.obstacles.filter(o=>o.type==='terrain').length<=1,'arena pulses must not overlap');
+    }
+    assert.equal(a.game.mode,'upgrade',`width ${width}, speed ${speed}, seed ${seed}`);
+    assert.equal(a.game.boss,null);assert.equal(seen.size,3);assert.ok(landed,'single jump reaches the safe stone');
+    assert.equal(a.game.shield,0);assert.equal(a.game.phaseCooldown,0);
+  }
+});
+
+test('magnetic quarry rocks pause behind the player and return at crouch height',()=>{
+  const a=setup();a.spawnBoss(3);a.game.boss.shot=Infinity;a.game.invincible=100;
+  a.launchAttack({type:'siege-rock',height:42,recall:true});const rock=a.game.obstacles[0];
+  for(let t=0;t<3&&rock.stage==='out';t+=1/120)a.update(1/120);
+  assert.equal(rock.stage,'windup');assert.equal(rock.y,239);assert.equal(rock.h,22);
+  const x=rock.x;a.advance(.3);assert.equal(rock.x,x);
+  a.advance(.6);assert.equal(rock.stage,'return');assert.ok(rock.x>x);
+  a.advance(3);assert.ok(!a.game.obstacles.includes(rock));
 });
 
 test('48 distinct named biomes continue into unique deterministic frontier regions', () => {
@@ -387,8 +429,8 @@ test('bosses keep attacking while prior volleys are still in flight', () => {
   assert.ok(a.game.boss.volley>before);
 });
 
-test('unchanged bird, dragon, and shadow volleys still have reachable dodges', () => {
-  for(const width of [390,1000])for(const speed of [500,920])for(const level of [1,4,5])for(const high of [false,true]) {
+test('unchanged bird and shadow volleys still have reachable dodges', () => {
+  for(const width of [390,1000])for(const speed of [500,920])for(const level of [1,5])for(const high of [false,true]) {
     let solved=false;
     for(const lead of [.18,.22,.26,.30,.34,.38,.42,.46]) {
       const a=setup(width);a.spawnBoss(level);a.game.invincible=0;
@@ -531,7 +573,7 @@ test('new quarry boss full fights are beatable using ordinary controls without s
         const impact=elapsed+warning.delay+(a.game.boss.x-a.dino.x-20)/velocity;
         plans.push({action:warning.action,impact,first:false,second:false});
       }
-      const duck=plans.some(p=>p.action==='high'&&elapsed>=p.impact-.3&&elapsed<=p.impact+.4);
+      const duck=a.game.obstacles.some(o=>o.recall&&o.stage!=='out'&&o.x<a.dino.x+90);
       a.events[duck?'keydown':'keyup']({code:'ArrowDown',preventDefault(){}});
       for(const plan of plans)if(plan.action!=='high') {
         if(!plan.first&&elapsed>=plan.impact-(plan.action==='tower'?.7:.34)){a.jump();plan.first=true;}
@@ -540,7 +582,7 @@ test('new quarry boss full fights are beatable using ordinary controls without s
       a.update(1/120);elapsed+=1/120;
     }
     assert.equal(a.game.mode,'running',`width ${width}, speed ${initialSpeed}, seed ${seed}`);
-    assert.equal(a.game.boss,null);assert.ok(seen.size>=3);
+    assert.equal(a.game.boss,null);assert.ok(seen.size>=2);
     assert.equal(a.game.shield,0);assert.equal(a.game.phaseCooldown,0);
   }
 });

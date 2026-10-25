@@ -13,3 +13,9 @@
 .achievement-node.locked .node-name{color:#99a48c}
 .phase-control{margin-left:auto;border:1px solid #c9c8ba;background:#fff;padding:10px 14px;font-size:9px;letter-spacing:.6px;touch-action:manipulation}.phase-control:disabled{opacity:.45;cursor:default}.phase-control:not(:disabled):hover{border-color:#737c60;background:#eff2e9}@media(pointer:coarse){#duck{margin-left:0}}
 .rules-page #controls .guide-grid{grid-template-columns:repeat(2,minmax(0,1fr))}@media(max-width:650px){.rules-page #controls .guide-grid{grid-template-columns:1fr}}
+/* Pickup symbols match the runway items. */
+.item-hud{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:#dddcd4;border:1px solid #dddcd4;margin:0 0 16px;text-align:left}
+.item-cell{display:flex;gap:12px;align-items:flex-start;padding:13px 14px;background:#fafaf7;min-width:0}
+.item-cell svg{width:29px;height:29px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linejoin:miter;margin-top:3px}
+.item-cell>div{display:flex;flex-direction:column;gap:4px;min-width:0}.item-label{font:10px Consolas,monospace;letter-spacing:1px;color:#77766e}.item-cell strong{font:600 13px Consolas,monospace}.item-cell small,.item-cell #fossil-value{font:11px/1.45 Consolas,monospace;color:#77766e}.item-cell progress{width:100%;max-width:130px;height:5px;accent-color:#737b58}.item-cell .phase-control{margin:0;padding:4px 7px;font-size:11px;align-self:flex-start}
+@media(max-width:650px){.item-hud{grid-template-columns:repeat(2,minmax(0,1fr))}.item-cell{padding:10px 8px;gap:8px}.item-cell svg{width:23px;height:23px}.item-cell strong{font-size:11px}.item-cell small{font-size:10px}}
