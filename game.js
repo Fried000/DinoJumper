@@ -15,6 +15,7 @@
   canvas.width = W;
   const GRAVITY = 1850, JUMP = -660;
   const BASE_SPEED = 500, MAX_SPEED = 920;
+  const BIOME_POINTS=3000,BORDER_APPROACH=400;
   const BIOMES = [
     { name: 'DESERT', bg: '#ffffff', ink: '#53534e', faint: '#e4e4dc', scenery: 'dune', obstacles: ['cactus','dry-bush','cactus-cluster'], subtitle: 'DUNES · CACTI · OPEN SKIES' },
     { name: 'SNOWFIELD', bg: '#f0f6fa', ink: '#4e6573', faint: '#cddde7', scenery: 'snow', obstacles: ['ice','snow-rock','frozen-stump'], subtitle: 'SNOW · ICE · FROZEN PINES' },
@@ -63,8 +64,8 @@
   const activeTheme=()=>getBiome(game.biome);
   const BOSSES = [
     { name: 'BALL-SPITTING BIRD', duration: 7, interval: [.95,1.25], hint: 'MULTI-BALL VOLLEYS · LOW: JUMP / HIGH: DUCK' },
-    { name: 'CHARGING TRICERATOPS', duration: 7.5, interval: [.9,1.2], hint: 'CHARGE CHAINS · BOULDERS ON YOUR HEELS' },
-    { name: 'BOULDER T. REX', duration: 8, interval: [.85,1.15], hint: 'TRIPLE THROWS · VARIABLE BOUNCES' },
+    { name: 'PRISM TRICERATOPS', duration: 7.5, interval: [1.5,1.75], hint: 'LASER WARNING → DUCK / JUMP / DOUBLE JUMP · X TO PHASE' },
+    { name: 'QUARRY T. REX', duration: 8, interval: [1.65,1.9], hint: 'READ THE ROCKS · LOW: JUMP / HIGH: DUCK / TALL: DOUBLE JUMP' },
     { name: 'VOLCANIC DRAGON', duration: 8.5, interval: [.8,1.1], hint: 'FIRE STREAMS + LAVA RAIN · KEEP MOVING' },
     { name: 'SHADOW DINO', duration: 9, interval: [.8,1.05], hint: 'STACKED VOLLEYS · DELAYED ECHOES · FINAL RAGE' },
   ];
@@ -128,7 +129,8 @@
     shield: 0, slow: 0, invincible: 0, message: '', messageTimer: 0,
     biomeSign: 0, bossesDefeated: 0, warnings: [], lastObstacle: '', completed: false,
     revivesUsed:0,fragments:0,runFossils:0,perks:newPerks(),upgradeOffers:[],wardActive:false,
-    lastUpgradeBossCount:0,event:null,nextEvent:15,routeId:0,visitedRoute:-1,lastPattern:'' };
+    lastUpgradeBossCount:0,event:null,nextEvent:15,routeId:0,visitedRoute:-1,lastPattern:'',
+    borderAnnounced:-1,previousBiome:0,biomeFade:0,phaseCooldown:0,phaseTrail:0 };
   const dino = { x: 105, y: GROUND - 45, w: 45, h: 45, vy: 0, jumps: 0, grounded: true, duck: false };
   let last = null;
   let duckKey = false;
@@ -174,7 +176,8 @@
       shield: 0, slow: 0, invincible: 1, message: '', messageTimer: 0,
       biomeSign: 3.5, bossesDefeated: 0, warnings: [], lastObstacle: '', completed: false,
       revivesUsed:0,fragments:0,runFossils:0,perks:newPerks(),upgradeOffers:[],wardActive:false,
-      lastUpgradeBossCount:0,event:null,nextEvent:rand(5,8),routeId:0,visitedRoute:-1,lastPattern:'' });
+      lastUpgradeBossCount:0,event:null,nextEvent:rand(5,8),routeId:0,visitedRoute:-1,lastPattern:'',
+      borderAnnounced:-1,previousBiome:0,biomeFade:0,phaseCooldown:0,phaseTrail:0 });
     Object.assign(dino, { y: GROUND - 45, vy: 0, jumps: 0, grounded: true, duck: false });
     duckKey = false;
     jumpHeld=false;
@@ -204,6 +207,24 @@
       game.boss.echoes.push({ delay: game.boss.age > game.boss.duration/2 ? .45 : .8, y: dino.y });
     }
     if (dino.jumps === 2) burst(dino.x + 20, dino.y + 40, 8);
+  }
+  function phaseDash() {
+    if(game.mode!=='running'||game.phaseCooldown>0)return false;
+    game.phaseCooldown=5;game.phaseTrail=.34;
+    game.invincible=Math.max(game.invincible,.34);
+    burst(dino.x+18,dino.y+24,9);announce('Phase dash. Ready again in five seconds.');return true;
+  }
+  function borderDistance(){return (Math.floor(score()/BIOME_POINTS)+1)*BIOME_POINTS-score();}
+  function synchronizeBiome(){
+    const biome=Math.floor(score()/BIOME_POINTS);
+    if(biome!==game.biome){
+      game.previousBiome=game.biome;game.biome=biome;game.biomeFade=1;game.biomeSign=3.5;
+      game.nextObstacle=Math.max(game.nextObstacle,1);game.nextRoute=Math.max(game.nextRoute,3.8);game.nextEvent=Math.max(game.nextEvent,4);
+      achievement.record('biome',{index:biome,name:activeTheme().name});discover('biomes',activeTheme().name);toast(`NEW BIOME · ${activeTheme().name}`);
+    }
+    if(borderDistance()<=BORDER_APPROACH&&game.borderAnnounced!==game.biome){
+      game.borderAnnounced=game.biome;toast(`BORDER AHEAD · ${getBiome(game.biome+1).name} · CLEAR STRETCH`);
+    }
   }
   function togglePause() {
     if (game.mode !== 'running' && game.mode !== 'paused') return;
@@ -308,7 +329,7 @@
     const w = bird ? 44 : Math.round(rand(24,60));
     const h = bird ? 28 : Math.round(rand(30,56));
     const y = bird ? GROUND - (Math.random() < .5 ? 56 : 38) : GROUND-h;
-    const obstacle={x:W+rand(20,95),y,w:type==='runner'?52:w,h:type==='runner'?32:h,type,hit:false};
+    const obstacle={x:W+rand(20,95),y,w:type==='runner'?52:w,h:type==='runner'?32:h,type,hit:false,biome:game.biome};
     if(type==='runner')obstacle.y=GROUND-32;
     if(game.event?.kind==='meteor') {obstacle.targetY=y;obstacle.startY=-40;obstacle.y=-40;}
     game.obstacles.push(obstacle);
@@ -322,15 +343,15 @@
     for (let i=0;i<4;i++) {
       const x = W+80+i*(risky?195:220);
       const y = GROUND-115-(i===1||i===2?(risky?30:15):0);
-      game.platforms.push({x,y,w:risky?155:190,h:8,routeId:game.routeId});
+      game.platforms.push({x,y,w:risky?155:190,h:8,routeId:game.routeId,biome:game.biome});
       game.pickups.push({x:x+55,y:y-34,w:19,h:19,type:i===3?'fragment':'fossil'});
-      if(risky && i===2)game.obstacles.push({x:x+100,y:y-28,w:32,h:28,type:'bird',hit:false});
+      if(risky && i===2)game.obstacles.push({x:x+100,y:y-28,w:32,h:28,type:'bird',hit:false,biome:game.biome});
     }
     toast(`${risky?'DARING':'SCENIC'} HIGH ROAD · FOSSILS + EGG FRAGMENT · GROUND IS OPTIONAL`);
   }
   function spawnBoss(level = Math.min(5,game.bossesDefeated+1)) {
     const spec = BOSSES[level-1];
-    game.boss = { ...spec, level, age: 0, shot: .8, x: W-145, y: 68, w: 88, h: 60, echoes: [], feints: 0, volley: 0, lastPattern:'',lastHigh:null,laneStreak:0 };
+    game.boss = { ...spec, level, age: 0, shot: .8, x: W-145, y: 68, w: 88, h: 60, echoes: [], feints: 0, volley: 0, lastPattern:'',lastHigh:null,laneStreak:0,laserBag:[] };
     // Clear the runway so boss projectiles do not create unfair combinations.
     game.obstacles = [];
     game.platforms = [];
@@ -354,6 +375,14 @@
     const boss = game.boss;
     if(!boss) return;
     const {type,high} = warning;
+    if(type==='laser') {
+      game.obstacles.push({x:0,y:warning.laneY,w:W,h:warning.height,type:'laser',ttl:.18,age:0,hit:false,biome:game.biome});return;
+    }
+    if(type==='siege-rock') {
+      const height=warning.height;
+      game.obstacles.push({x:boss.x,y:warning.laneY??GROUND-height,w:warning.width||34,h:height,
+        vx:Math.min(game.speed,(boss.x-dino.x)/1.05),type:'siege-rock',hit:false,age:0,biome:game.biome});return;
+    }
     const size = type==='charge'?48:type==='boulder'?Math.round(rand(25,34)):22;
     const y = warning.laneY ?? GROUND-(high?53:size);
     // Keep the same travel time inside each volley, including on narrow screens.
@@ -396,11 +425,21 @@
       for(let i=0;i<pattern.count;i++)warnAttack('ball',pattern.high,0,{spacing:i*pattern.gap});
       if(pattern.sky)ceiling();
     } else if(boss.level===2) {
-      if(high) {train('ball',3,true);ceiling();}
-      else {warnAttack('charge');warnAttack('boulder',false,0,{spacing:.22,bounce:8});ceiling();}
+      let action;
+      if(boss.volley%4===0)action='scatter';
+      else {
+        if(!boss.laserBag.length){boss.laserBag=['duck','jump','double'];for(let i=2;i>0;i--){const j=Math.floor(Math.random()*(i+1));[boss.laserBag[i],boss.laserBag[j]]=[boss.laserBag[j],boss.laserBag[i]];}}
+        action=boss.laserBag.pop();
+      }
+      const y=action==='duck'?rand(GROUND-39,GROUND-28):action==='jump'?rand(GROUND-80,GROUND-45):action==='double'?rand(GROUND-190,GROUND-145):rand(20,GROUND-16);
+      const height=action==='jump'||action==='double'?GROUND-y:8;
+      game.warnings.push({type:'laser',action,laneY:y,height,delay:.95,label:action==='double'?'LASER CURTAIN · DOUBLE JUMP':action==='jump'?'LOW LASER CURTAIN · JUMP':action==='duck'?'HEAD-HEIGHT LASER · DUCK':'SCATTER LASER · READ THE LINE'});
     } else if(boss.level===3) {
-      if(high) {train('ball',3,true);ceiling();}
-      else {train('boulder',3,false,{bounce:rand(8,18)});ceiling();}
+      const choices=['ground','high','tower'].filter(p=>p!==boss.lastPattern);
+      const pattern=choices[Math.floor(Math.random()*choices.length)];boss.lastPattern=pattern;
+      const height=pattern==='tower'?rand(132,146):pattern==='high'?20:rand(35,52);
+      game.warnings.push({type:'siege-rock',action:pattern,height,laneY:pattern==='high'?rand(GROUND-52,GROUND-46):GROUND-height,width:pattern==='tower'?34:40,
+        delay:.7,label:pattern==='tower'?'ROCK TOWER · DOUBLE JUMP':pattern==='high'?'HIGH ROCK · DUCK':'GROUND ROCK · JUMP'});
     } else if(boss.level===4) {
       if(high)train('fireball',3,true);
       else {train('fireball',3);warnAttack('rain');}
@@ -466,8 +505,10 @@
     game.speed = Math.min(MAX_SPEED,BASE_SPEED+game.distance/32);
     for (const key of ['shield','slow','invincible','messageTimer','biomeSign']) game[key] = Math.max(0,game[key]-dt);
     if(game.wardActive&&game.boss&&game.shield>0)game.shield=Math.max(game.shield,game.boss.duration-game.boss.age+1);
-    const biome = Math.floor(score()/1000);
-    if (biome !== game.biome) { game.biome = biome; game.biomeSign=3.5;achievement.record('biome',{index:biome,name:activeTheme().name});discover('biomes',activeTheme().name);toast(`NEW BIOME · ${activeTheme().name}`); }
+    for(const key of ['biomeFade','phaseCooldown','phaseTrail'])game[key]=Math.max(0,game[key]-dt);
+    synchronizeBiome();
+    const nearBorder=borderDistance()<=BORDER_APPROACH;
+    const bossApproach=!game.completed&&score()>=game.nextBoss-170;
     dino.duck = duckKey && dino.grounded;
     const oldBottom = dino.y+dino.h;
     dino.vy += GRAVITY*dt*(duckKey && !dino.grounded && game.perks.fall>0 && dino.vy>0?2.4:1);
@@ -497,7 +538,7 @@
     if (dino.grounded) dino.duck = duckKey;
     game.platforms = game.platforms.filter(p=>p.x+p.w>0 && (p.crumble===undefined||p.crumble===null||p.crumble>0));
 
-    if (!game.boss && !game.completed && score() >= game.nextBoss) {
+    if (!game.boss && !game.completed && score() >= game.nextBoss && !game.obstacles.some(o=>!o.hit&&o.x+o.w>0)) {
       game.nextBoss += 1000;
       spawnBoss();
     }
@@ -514,7 +555,7 @@
         }
       }
       boss.echoes=boss.echoes.filter(e=>!e.sent);
-      if (boss.shot <= 0 && boss.age < boss.duration-2) {
+      if (boss.shot <= 0 && boss.age < boss.duration-(boss.level===2?1.05:2)) {
         bossAttack(boss);
         const rage=boss.level===5 && boss.age>boss.duration/2;
         boss.shot=rand(...boss.interval)*(rage?.9:1);
@@ -539,9 +580,9 @@
     } else {
       game.nextEvent-=worldDt;
       if(game.event) {game.event.left-=worldDt;if(game.event.left<=0){achievement.record('eventWin',{kind:game.event.kind});game.event=null;}}
-      if(game.nextEvent<=0&&!game.event){startEvent();game.nextEvent=rand(16,24);}
+      if(game.nextEvent<=0&&!game.event&&!nearBorder&&!bossApproach){startEvent();game.nextEvent=rand(16,24);}
       game.nextObstacle -= worldDt;
-      if (game.nextObstacle<=0) { spawnObstacle(); game.nextObstacle=rand(.78,1.35); }
+      if (game.nextObstacle<=0&&!nearBorder&&!bossApproach) { spawnObstacle(); game.nextObstacle=rand(.78,1.35); }
       game.nextPickup -= worldDt;
       if (game.nextPickup<=0) {
         const roll=Math.random();
@@ -549,11 +590,12 @@
         game.nextPickup=rand(11,15);
       }
       game.nextRoute -= worldDt;
-      if (game.nextRoute<=0 && !game.platforms.length) { spawnRoute(); game.nextRoute=rand(22,28); }
+      if (game.nextRoute<=0 && !game.platforms.length && borderDistance()>650 && (game.completed||score()<game.nextBoss-400)) { spawnRoute(); game.nextRoute=rand(22,28); }
     }
     const box = playerBox();
     for (const obstacle of game.obstacles) {
-      obstacle.x -= (obstacle.vx||game.speed)*worldDt;
+      if(obstacle.type==='laser'){obstacle.ttl-=worldDt;if(obstacle.ttl<=0)continue;}
+      else obstacle.x -= (obstacle.vx||game.speed)*worldDt;
       obstacle.age=(obstacle.age||0)+worldDt;
       if(obstacle.targetY!==undefined)obstacle.y=obstacle.startY+(obstacle.targetY-obstacle.startY)*Math.min(1,obstacle.age/.3);
       if(obstacle.bounce)obstacle.y=GROUND-obstacle.h-Math.abs(Math.sin(obstacle.age*obstacle.frequency))*obstacle.bounce;
@@ -566,7 +608,7 @@
         if (game.mode !== 'running') return;
       }
     }
-    game.obstacles = game.obstacles.filter(o=>o.x+o.w>0 && o.y<H+50 && !o.hit);
+    game.obstacles = game.obstacles.filter(o=>o.x+o.w>0 && o.y<H+50 && !o.hit && (o.ttl===undefined||o.ttl>0));
     for (const pickup of game.pickups) {
       pickup.x -= dx;
       const radius=Math.min(140,game.perks.magnet*35);
@@ -580,6 +622,7 @@
     game.pickups=game.pickups.filter(p=>p.x+p.w>0&&!p.collected);
     for (const p of game.particles) { p.x+=p.vx*dt-dx/2; p.y+=p.vy*dt; p.vy+=300*dt; p.life-=dt; }
     game.particles=game.particles.filter(p=>p.life>0);
+    synchronizeBiome();
     achievement.record('tick',{dt,score:score(),speed:game.speed,fastFall:duckKey&&!dino.grounded&&dino.vy>0&&game.perks.fall>0});
   }
   function updateHUD() {
@@ -590,7 +633,7 @@
     const effects = [];
     if (game.shield>0) effects.push(`SHIELD ${Math.ceil(game.shield)}s`);
     if (game.slow>0) effects.push(`SLOW ${Math.ceil(game.slow)}s`);
-    $('effect').textContent = effects.join(' / ') || game.event?.name || '';
+    $('effect').textContent = effects.join(' / ') || (borderDistance()<=BORDER_APPROACH?`NEXT: ${getBiome(game.biome+1).name}`:game.event?.name||'');
     $('route-status').textContent = game.routeActive?'UPPER ROUTE':'';
     $('eggs').textContent=`EGGS ${2-game.revivesUsed} / 2`;
     $('fragments').textContent=`FRAGMENTS ${game.fragments} / ${game.perks.finder?2:3}`;
@@ -600,6 +643,7 @@
     const label=owned||'None yet — choose an upgrade after bosses 2 and 4.';
     if($('active-upgrades').textContent!==label)$('active-upgrades').textContent=label;
     const upgradeBar=document.querySelector('.equipped-upgrades');if(upgradeBar)upgradeBar.hidden=!owned;
+    if($('phase')){$('phase').textContent=game.phaseCooldown>0?`X · PHASE ${Math.ceil(game.phaseCooldown)}s`:'X · PHASE READY';$('phase').disabled=game.mode!=='running'||game.phaseCooldown>0;}
     document.querySelector('.game-shell').style.setProperty('--game-bg',theme.bg);
   }
   function pixelDino(x,y,scale=2,duck=false,animate=true) {
@@ -775,7 +819,7 @@
     const x=boss.x+(1-Math.min(1,boss.age/1.4))*180;
     ctx.save();
     if(boss.level===1)bird({x,y:boss.y+Math.sin(game.time*2)*10},true);
-    else if(boss.level===2)triceratops(x,GROUND-65,95,65);
+    else if(boss.level===2){triceratops(x,GROUND-65,95,65);ctx.fillRect(x-8,GROUND-57,23,10);ctx.strokeRect(x-13,GROUND-61,13,18);}
     else if(boss.level===3) {
       ctx.translate(x+70,GROUND);ctx.scale(-1,1);pixelDino(0,-45,4,false,false);
     } else if(boss.level===4) {
@@ -788,6 +832,11 @@
     }ctx.restore();
   }
   function drawHazard(o,theme) {
+    if(o.type==='laser'){drawLaser(o,false);return;}
+    if(o.type==='siege-rock'){
+      for(let row=0;row<o.h;row+=22){ctx.fillRect(Math.round(o.x)+(Math.floor(row/22)%2)*3,Math.round(o.y+row),o.w-3,Math.min(20,o.h-row));}
+      ctx.strokeStyle=theme.bg;ctx.beginPath();ctx.moveTo(o.x+12,o.y+8);ctx.lineTo(o.x+o.w-8,o.y+o.h-8);ctx.stroke();ctx.strokeStyle=theme.ink;return;
+    }
     if(o.type==='runner') {pixelDino(o.x,o.y-13,2,false,false);return;}
     if(o.type==='bird') {bird(o);return;}
     if(o.type==='charge') {triceratops(o.x,o.y,o.w,o.h);return;}
@@ -802,6 +851,15 @@
       return;
     }
     themedObstacle(o,theme);
+  }
+  function drawLaser(laser,warning) {
+    ctx.save();
+    const y=laser.laneY??laser.y,h=laser.height??laser.h;
+    ctx.fillStyle=warning?'#ad785a':'#c95e48';ctx.globalAlpha=warning ? .06 : .18;ctx.fillRect(0,y,W,h);
+    ctx.globalAlpha=warning ? .6 : .9;ctx.strokeStyle=warning?'#a87555':'#c95e48';ctx.lineWidth=warning?1:2;
+    ctx.setLineDash(warning?[7,7]:[]);ctx.beginPath();ctx.moveTo(0,y+.5);ctx.lineTo(W,y+.5);ctx.stroke();
+    if(!warning){ctx.globalAlpha=.6;for(let line=y+7;line<y+h;line+=12){ctx.fillRect(0,line,W,2);}}
+    ctx.setLineDash([]);ctx.restore();
   }
   function cactus(o) {
     const s=o.h/48;
@@ -839,8 +897,10 @@
   }
   function draw() {
     const theme=activeTheme();
-    ctx.fillStyle=theme.bg;ctx.fillRect(0,0,W,H);
-    scenery(theme);
+    if(game.biomeFade>0){
+      const previous=getBiome(game.previousBiome);ctx.fillStyle=previous.bg;ctx.fillRect(0,0,W,H);scenery(previous);
+      ctx.save();ctx.globalAlpha=1-game.biomeFade;ctx.fillStyle=theme.bg;ctx.fillRect(0,0,W,H);scenery(theme);ctx.restore();
+    }else{ctx.fillStyle=theme.bg;ctx.fillRect(0,0,W,H);scenery(theme);}
     if(game.event&&!reducedMotion) {
       ctx.fillStyle=theme.faint;ctx.strokeStyle=theme.faint;
       for(let i=0;i<28;i++) {
@@ -861,7 +921,8 @@
       ctx.setLineDash([5,4]);ctx.strokeRect(Math.round(p.x),p.y,p.w,5);ctx.setLineDash([]);
       ctx.fillStyle=theme.faint;ctx.fillRect(p.x,p.y+6,p.w,3);ctx.fillStyle=theme.ink;
     }ctx.globalAlpha=1;
-    for(const o of game.obstacles)drawHazard(o,theme);
+    for(const o of game.obstacles){const ownTheme=getBiome(o.biome??game.biome);ctx.fillStyle=ownTheme.ink;ctx.strokeStyle=ownTheme.ink;drawHazard(o,ownTheme);}
+    ctx.fillStyle=theme.ink;ctx.strokeStyle=theme.ink;
     for(const p of game.pickups) drawPickup(p);
     if(game.boss) {
       const boss=game.boss;
@@ -873,13 +934,15 @@
       ctx.fillStyle=theme.ink;ctx.fillRect(W-170,38,140*(1-boss.age/boss.duration),3);
       const warning=game.warnings[0];
       if(warning) {
+        if(warning.type==='laser')drawLaser(warning,true);
         ctx.textAlign='center';ctx.font='bold 12px Consolas,monospace';
         ctx.fillText(`! ${warning.label} !`,W/2,145);
-        const lane=warning.high?GROUND-42:GROUND-12;
+        const lane=warning.laneY??(warning.high?GROUND-42:GROUND-12);
         ctx.setLineDash([5,8]);ctx.beginPath();ctx.moveTo(W-190,lane);ctx.lineTo(W,lane);ctx.stroke();ctx.setLineDash([]);
       }
     }
     if(game.time<1||game.invincible<=0||Math.floor(game.time*14)%2===0||game.mode!=='running')pixelDino(dino.x,dino.y,2,dino.duck);
+    if(game.phaseTrail>0){ctx.save();ctx.globalAlpha=.22;pixelDino(dino.x-22,dino.y,2,dino.duck,false);ctx.globalAlpha=.1;pixelDino(dino.x-43,dino.y,2,dino.duck,false);ctx.restore();}
     if(game.shield>0) {
       ctx.setLineDash([4,3]);ctx.strokeRect(dino.x-7,dino.y-6,59,58);ctx.setLineDash([]);
     }
@@ -914,10 +977,12 @@
   $('journal')?.addEventListener('toggle',()=>{if($('journal').open&&game.mode==='running')togglePause();});
   $('restart').addEventListener('click',()=>{reset();canvas.focus({preventScroll:true});});
   $('pause').addEventListener('click',togglePause);
+  $('phase')?.addEventListener('click',()=>{phaseDash();canvas.focus({preventScroll:true});});
   document.addEventListener('keydown',e=>{
     if(game.mode==='upgrade'&&['Digit1','Digit2','Digit3'].includes(e.code)) {
       e.preventDefault();chooseUpgrade(game.upgradeOffers[Number(e.code.slice(-1))-1]);return;
     }
+    if(e.code==='KeyX'){e.preventDefault();if(!e.repeat)phaseDash();return;}
     if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW') {
       if(e.target instanceof HTMLButtonElement || e.target instanceof HTMLAnchorElement)return;
       e.preventDefault();if(!e.repeat&&!jumpHeld){jumpHeld=true;jump();}

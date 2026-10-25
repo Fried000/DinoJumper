@@ -28,7 +28,7 @@ function setup(width = 1000, seed = 12345, storage = new Map(), withAchievements
   sandbox.Math=randomMath;
   const source = fs.readFileSync(require.resolve('../game.js'), 'utf8')
     .replace('  renderJournal();updateHUD();requestAnimationFrame(frame);',
-      '  globalThis.api = {game,dino,reset,jump,update,togglePause,spawnRoute,spawnBoss,playerBox,draw,score,frame,spawnObstacle,bossAttack,launchAttack,pixelDino,DUCK_DINO,BIOMES,BOSSES,UPGRADES,getBiome,continueExploring,journal,offerRevive,useRevive,chooseUpgrade,openUpgrade,startEvent,collectPickup,endRun,discover,updateHUD};');
+      '  globalThis.api = {game,dino,reset,jump,update,togglePause,spawnRoute,spawnBoss,playerBox,draw,score,frame,spawnObstacle,bossAttack,launchAttack,pixelDino,DUCK_DINO,BIOMES,BOSSES,UPGRADES,getBiome,continueExploring,journal,offerRevive,useRevive,chooseUpgrade,openUpgrade,startEvent,collectPickup,endRun,discover,updateHUD,phaseDash,synchronizeBiome,borderDistance};');
   vm.createContext(sandbox);
   if(withAchievements) {
     for(const file of ['achievements-data.js','achievement-engine.js'])vm.runInContext(fs.readFileSync(require.resolve('../'+file),'utf8'),sandbox);
@@ -99,25 +99,28 @@ test('power-up pickups activate and expire, and slow time preserves jump physics
   assert.equal(a.game.slow, 0);
 });
 
-test('biomes advance every 1000 displayed points, including bonuses, without looping', () => {
+test('biomes advance every 3000 displayed points, including bonuses, without looping', () => {
   const a = setup();
-  a.game.bonus = 900; a.update(.001);
+  a.game.nextBoss=Infinity;a.game.bonus = 2900; a.update(.001);
   assert.equal(a.game.biome, 0);
   assert.equal(a.game.boss, null);
   a.game.distance = 1000; a.update(.001); assert.equal(a.game.biome, 1);
-  a.game.distance = 21000; a.update(.001); assert.equal(a.game.biome, 3);
-  a.game.bonus=0;a.game.distance=9999;a.update(.00001);assert.equal(a.game.biome,0);
-  a.game.distance=10000;a.update(.00001);assert.equal(a.game.biome,1);
-  a.game.distance=480000;a.update(.00001);assert.equal(a.game.biome,48);
+  a.game.distance = 61000; a.update(.001); assert.equal(a.game.biome, 3);
+  a.game.bonus=0;a.game.distance=29999;a.update(.00001);assert.equal(a.game.biome,0);
+  a.game.distance=30000;a.update(.00001);assert.equal(a.game.biome,1);
+  a.game.distance=1440000;a.update(.00001);assert.equal(a.game.biome,48);
 });
 
-test('boss arrival clears hazards, generates projectiles, and rewards survival', () => {
+test('boss arrival waits for old hazards to leave, then generates shots and rewards survival', () => {
   const a = setup();
-  a.game.obstacles.push({ x: 400 });
+  const old={x:400,y:252,w:24,h:40,type:'cactus'};a.game.obstacles.push(old);
   a.game.distance = 10000; a.update(.001);a.chooseUpgrade('skip');
+  assert.equal(a.game.boss,null);assert.ok(a.game.obstacles.includes(old));
+  a.game.invincible=100;a.advance(1);
   assert.ok(a.game.boss);
   assert.equal(a.game.obstacles.length, 0);
   assert.equal(a.game.nextBoss, 2000);
+  a.game.boss.age=0;a.game.boss.shot=.8;
   a.game.invincible = 30;
   a.advance(4);
   assert.ok(a.game.obstacles.some(o => o.type === 'ball'));
@@ -184,7 +187,7 @@ test('each biome spawns its own obstacles and announces entry with a sign', () =
     assert.equal(types.size,3);
     assert.ok([...types].every(type=>a.BIOMES[biome].obstacles.includes(type)));
   }
-  a.game.distance=10000;a.game.biome=0;a.game.nextBoss=Infinity;a.update(.01);
+  a.game.distance=30000;a.game.biome=0;a.game.nextBoss=Infinity;a.update(.01);
   assert.equal(a.game.biome,1);assert.ok(a.game.biomeSign>3);
   assert.match(a.game.message,/NEW BIOME.*SNOWFIELD/);
 });
@@ -197,7 +200,7 @@ test('speed starts at 500, rises quickly, and is capped at 920', () => {
 
 test('all five bosses have distinct attacks, warnings, increasing duration and rewards', () => {
   const a=setup();
-  const expected=[['ball'],['charge','boulder'],['boulder'],['rain','fireball'],['boulder','fireball','ball']];
+  const expected=[['ball'],['laser'],['siege-rock'],['rain','fireball'],['boulder','fireball','ball']];
   let previousDuration=0;
   for(let level=1;level<=5;level++) {
     a.game.nextBoss=Infinity;a.spawnBoss();const boss=a.game.boss;
@@ -349,7 +352,7 @@ test('high bird balls hit standing dino but clear its dedicated crouch sprite', 
 });
 
 test('boulders bounce, lava falls, dragon platforms crumble and shadow copies jumps', () => {
-  const a=setup();a.spawnBoss(3);a.launchAttack({type:'boulder'});
+  const a=setup();a.spawnBoss(5);a.launchAttack({type:'boulder'});
   const rock=a.game.obstacles[0],initialY=rock.y;a.advance(.15);assert.notEqual(rock.y,initialY);
   a.spawnBoss(4);a.launchAttack({type:'rain'});
   const rain=a.game.obstacles[0],rainY=rain.y;a.advance(.1);assert.ok(rain.y>rainY);
@@ -384,13 +387,13 @@ test('bosses keep attacking while prior volleys are still in flight', () => {
   assert.ok(a.game.boss.volley>before);
 });
 
-test('all five boss volleys leave a physically reachable dodge on phone and desktop', () => {
-  for(const width of [390,1000])for(const speed of [500,920])for(const level of [1,2,3,4,5])for(const high of [false,true]) {
+test('unchanged bird, dragon, and shadow volleys still have reachable dodges', () => {
+  for(const width of [390,1000])for(const speed of [500,920])for(const level of [1,4,5])for(const high of [false,true]) {
     let solved=false;
     for(const lead of [.18,.22,.26,.30,.34,.38,.42,.46]) {
       const a=setup(width);a.spawnBoss(level);a.game.invincible=0;
       a.game.distance=(speed-500)*32;a.game.speed=speed;
-      a.game.biome=Math.floor(a.score()/1000);
+      a.game.biome=Math.floor(a.score()/3000);
       a.game.boss.shot=Infinity;a.game.boss.volley=high?1:0;
       a.bossAttack(a.game.boss);
       const travel=(a.game.boss.x-a.dino.x)/Math.min(speed*1.12,(a.game.boss.x-a.dino.x)/.8);
@@ -467,4 +470,114 @@ test('real game actions feed the achievement tracker, including pickups, bosses,
   assert.equal(tracker.state.stats.boss1,1);assert.ok(tracker.state.flags.perfectBoss);
   a.offerRevive();a.useRevive();assert.equal(tracker.state.stats.revives,1);
   a.endRun();assert.equal(tracker.state.best.score,a.score());
+});
+
+test('biome approach becomes empty before the boundary and existing obstacles are never cut off',()=>{
+  for(const width of [390,1000]) {
+    const a=setup(width);a.game.nextBoss=Infinity;a.game.invincible=100;
+    a.game.distance=25990;a.game.speed=920;a.game.nextObstacle=0;a.game.nextRoute=0;a.game.nextEvent=0;
+    const old={x:width<650?620:1020,y:250,w:26,h:42,type:'cactus',biome:0};a.game.obstacles=[old];
+    a.update(.02);assert.equal(a.game.obstacles.length,1);assert.ok(a.game.obstacles.includes(old));assert.match(a.game.message,/BORDER AHEAD/);
+    while(a.score()<2999){a.update(1/120);if(a.score()>=2800)assert.equal(a.game.obstacles.length,0);}
+    assert.equal(a.game.platforms.length,0);assert.equal(a.game.event,null);
+    a.advance(.04);assert.equal(a.game.biome,1);assert.ok(a.game.biomeFade>0);assert.match(a.game.message,/NEW BIOME.*SNOWFIELD/);
+  }
+  const a=setup();a.game.nextBoss=Infinity;a.game.invincible=100;
+  a.spawnObstacle();const old=a.game.obstacles[0];old.x=400;
+  a.game.distance=29999;a.game.speed=920;a.update(.01);
+  assert.equal(a.game.biome,1);assert.ok(a.game.obstacles.includes(old));assert.equal(old.biome,0);a.draw();
+});
+
+test('laser boss uses continuous heights and guarantees duck, jump, and double-jump patterns',()=>{
+  const a=setup();a.spawnBoss(2);const ys=new Set(),actions=new Set();
+  for(let i=0;i<60;i++) {
+    a.game.warnings=[];a.bossAttack(a.game.boss);const warning=a.game.warnings[0];
+    assert.equal(warning.type,'laser');assert.ok(warning.delay>=.9);ys.add(warning.laneY.toFixed(2));actions.add(warning.action);
+    assert.ok(warning.laneY>=20&&warning.laneY<292);assert.ok(warning.height>0);
+  }
+  assert.ok(ys.size>50);assert.deepEqual([...actions].sort(),['double','duck','jump','scatter']);
+});
+
+test('laser curtains require the advertised moves and each has a reachable safe response',()=>{
+  for(const width of [390,1000])for(const action of ['duck','jump','double'])for(const seed of [1,42,12345,99999]) {
+    const a=setup(width,seed);a.spawnBoss(2);a.game.invincible=0;a.game.revivesUsed=2;a.game.boss.shot=Infinity;
+    a.game.boss.laserBag=[action];a.bossAttack(a.game.boss);const warning=a.game.warnings[0];
+    assert.equal(warning.action,action);
+    let first=false,second=false;
+    for(let t=0;t<1.3&&a.game.mode==='running';t+=1/120) {
+      if(action==='duck')a.events.keydown({code:'ArrowDown',preventDefault(){}});
+      if(action==='jump'&&!first&&t>=.60){a.jump();first=true;}
+      if(action==='double') {
+        if(!first&&t>=.30){a.jump();first=true;}
+        if(!second&&t>=.67){a.jump();second=true;}
+      }
+      a.update(1/120);
+    }
+    assert.equal(a.game.mode,'running',`${width} ${action} seed ${seed}`);
+    assert.equal(a.game.obstacles.filter(o=>o.type==='laser').length,0);
+  }
+  const idle=setup();idle.spawnBoss(2);idle.game.invincible=0;idle.game.revivesUsed=2;idle.game.boss.shot=Infinity;idle.game.boss.laserBag=['double'];idle.bossAttack(idle.game.boss);idle.advance(1.2);assert.equal(idle.game.mode,'over');
+});
+
+test('new quarry boss full fights are beatable using ordinary controls without shields or revives',()=>{
+  for(const width of [390,1000])for(const initialSpeed of [500,920])for(const seed of [1,42,77,12345]) {
+    const a=setup(width,seed);a.spawnBoss(3);a.game.invincible=0;a.game.revivesUsed=2;
+    a.game.distance=(initialSpeed-500)*32;a.game.speed=initialSpeed;a.game.nextBoss=Infinity;
+    const seen=new Set(),plans=[];let elapsed=0;
+    while(a.game.boss&&a.game.mode==='running'&&elapsed<12) {
+      for(const warning of a.game.warnings)if(!seen.has(warning)) {
+        seen.add(warning);assert.equal(warning.type,'siege-rock');
+        const velocity=Math.min(a.game.speed,(a.game.boss.x-a.dino.x)/1.05);
+        const impact=elapsed+warning.delay+(a.game.boss.x-a.dino.x-20)/velocity;
+        plans.push({action:warning.action,impact,first:false,second:false});
+      }
+      const duck=plans.some(p=>p.action==='high'&&elapsed>=p.impact-.3&&elapsed<=p.impact+.4);
+      a.events[duck?'keydown':'keyup']({code:'ArrowDown',preventDefault(){}});
+      for(const plan of plans)if(plan.action!=='high') {
+        if(!plan.first&&elapsed>=plan.impact-(plan.action==='tower'?.7:.34)){a.jump();plan.first=true;}
+        if(plan.action==='tower'&&!plan.second&&elapsed>=plan.impact-.33){a.jump();plan.second=true;}
+      }
+      a.update(1/120);elapsed+=1/120;
+    }
+    assert.equal(a.game.mode,'running',`width ${width}, speed ${initialSpeed}, seed ${seed}`);
+    assert.equal(a.game.boss,null);assert.ok(seen.size>=3);
+    assert.equal(a.game.shield,0);assert.equal(a.game.phaseCooldown,0);
+  }
+});
+
+test('phase dash protects briefly, has a five-second cooldown, and never consumes an egg',()=>{
+  const a=setup();a.game.nextObstacle=100;a.game.nextRoute=100;a.game.nextEvent=100;a.game.invincible=0;
+  assert.equal(a.phaseDash(),true);assert.equal(a.game.phaseCooldown,5);assert.ok(a.game.invincible>=.3);
+  a.game.obstacles.push({x:0,y:250,w:1000,h:42,type:'laser',ttl:.18});a.advance(.25);
+  assert.equal(a.game.mode,'running');assert.equal(a.game.revivesUsed,0);assert.equal(a.phaseDash(),false);
+  a.advance(5);assert.equal(a.phaseDash(),true);a.togglePause();assert.equal(a.phaseDash(),false);
+});
+
+test('complete laser fights are survivable using jump, double jump and crouch without phase or protection',()=>{
+  for(const width of [390,1000])for(const speed of [500,920])for(const seed of [1,42,12345,99999]) {
+    const a=setup(width,seed);a.game.bossesDefeated=1;a.spawnBoss(2);a.game.revivesUsed=2;a.game.invincible=0;a.game.nextBoss=Infinity;
+    a.game.distance=(speed-500)*32;a.game.speed=speed;
+    const seen=new Set(),actions=new Set(),plans=[];let time=0;
+    while(a.game.boss&&a.game.mode==='running'&&time<10) {
+      for(const warning of a.game.warnings)if(!seen.has(warning)) {
+        seen.add(warning);actions.add(warning.action);
+        let action=warning.action;
+        if(action==='scatter')action=warning.laneY+6<=257?'none':warning.laneY+6<=272?'duck':'jump';
+        plans.push({action,impact:time+warning.delay,first:false,second:false});
+      }
+      const duck=plans.some(p=>p.action==='duck'&&time>=p.impact-.2&&time<=p.impact+.25);
+      a.events[duck?'keydown':'keyup']({code:'ArrowDown',preventDefault(){}});
+      for(const plan of plans) {
+        if(plan.action==='jump'&&!plan.first&&time>=plan.impact-.35){a.jump();plan.first=true;}
+        if(plan.action==='double') {
+          if(!plan.first&&time>=plan.impact-.65){a.jump();plan.first=true;}
+          if(!plan.second&&time>=plan.impact-.28){a.jump();plan.second=true;}
+        }
+      }
+      a.update(1/120);time+=1/120;
+    }
+    assert.equal(a.game.mode,'upgrade',`${width} ${speed} ${seed}`);
+    assert.equal(a.game.boss,null);assert.ok(['duck','jump','double'].every(action=>actions.has(action)));
+    assert.equal(a.game.shield,0);assert.equal(a.game.phaseCooldown,0);
+  }
 });

@@ -16,8 +16,8 @@
       state.best.score=Math.max(numeric(legacy.best),numeric(Number(localStorage.getItem('dino-jumper-best'))));
       if(Array.isArray(legacy.biomes))state.sets.biomes=[...new Set(legacy.biomes.filter(v=>typeof v==='string'))].slice(0,5000);
       state.sets.namedBiomes=state.sets.biomes.filter(name=>!/[0-9]+$/.test(name));
-      const bosses=['BALL-SPITTING BIRD','CHARGING TRICERATOPS','BOULDER T. REX','VOLCANIC DRAGON','SHADOW DINO'];
-      bosses.forEach((name,i)=>{if(Array.isArray(legacy.bosses)&&legacy.bosses.includes(name))state.stats['boss'+(i+1)]=1;});
+      const bosses=[['BALL-SPITTING BIRD'],['CHARGING TRICERATOPS','PRISM TRICERATOPS'],['BOULDER T. REX','QUARRY T. REX'],['VOLCANIC DRAGON'],['SHADOW DINO']];
+      bosses.forEach((names,i)=>{if(Array.isArray(legacy.bosses)&&names.some(name=>legacy.bosses.includes(name)))state.stats['boss'+(i+1)]=1;});
     }
   } catch {}
   let run=null,elapsed=0,check=0,listener=null;
