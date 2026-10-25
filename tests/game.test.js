@@ -5,7 +5,7 @@ const vm = require('node:vm');
 
 // Exercise the actual game loop in a minimal DOM. The test hook is injected into
 // the VM copy only, so the game does not expose mutable state in the browser.
-function setup(width = 1000, seed = 12345, storage = new Map(), withAchievements = false) {
+function setup(width = 1000, seed = 12345, storage = new Map(), withAchievements = false, withDiscovery = false) {
   const elements = new Map();
   const draws = [];
   const context = new Proxy({}, { get: (_,name) => (...args) => { draws.push([name,...args]); } });
@@ -28,8 +28,9 @@ function setup(width = 1000, seed = 12345, storage = new Map(), withAchievements
   sandbox.Math=randomMath;
   const source = fs.readFileSync(require.resolve('../game.js'), 'utf8')
     .replace('  renderJournal();updateHUD();requestAnimationFrame(frame);',
-      '  globalThis.api = {game,dino,reset,jump,update,togglePause,spawnRoute,spawnBoss,playerBox,draw,score,frame,spawnObstacle,bossAttack,launchAttack,pixelDino,DUCK_DINO,BIOMES,BOSSES,UPGRADES,getBiome,continueExploring,journal,offerRevive,useRevive,chooseUpgrade,openUpgrade,startEvent,collectPickup,endRun,discover,updateHUD,phaseDash,synchronizeBiome,borderDistance};');
+      '  globalThis.api = {game,dino,reset,jump,update,togglePause,spawnRoute,spawnBoss,playerBox,draw,score,frame,spawnObstacle,bossAttack,launchAttack,pixelDino,DUCK_DINO,BIOMES,BOSSES,UPGRADES,getBiome,continueExploring,journal,offerRevive,useRevive,chooseUpgrade,openUpgrade,startEvent,collectPickup,endRun,discover,updateHUD,phaseDash,synchronizeBiome,borderDistance,spawnFossilTrail,offerPortal,choosePortal,finishPortal,activeTheme};');
   vm.createContext(sandbox);
+  if(withDiscovery)vm.runInContext(fs.readFileSync(require.resolve('../discovery.js'),'utf8'),sandbox);
   if(withAchievements) {
     for(const file of ['achievements-data.js','achievement-engine.js'])vm.runInContext(fs.readFileSync(require.resolve('../'+file),'utf8'),sandbox);
     sandbox.window.DinoAchievements=sandbox.DinoAchievements;
@@ -43,7 +44,7 @@ function setup(width = 1000, seed = 12345, storage = new Map(), withAchievements
       api.update(1 / 120);
     }
   };
-  return { ...api, elements, events, draws, storage, achievements:sandbox.DinoAchievements };
+  return { ...api, elements, events, draws, storage, achievements:sandbox.DinoAchievements, discovery:sandbox.window.DinoDiscovery };
 }
 
 test('two jumps are allowed, a third is blocked, and landing restores jumps', () => {
@@ -58,6 +59,72 @@ test('two jumps are allowed, a third is blocked, and landing restores jumps', ()
   a.advance(1);
   assert.equal(a.dino.grounded, true);
   assert.equal(a.dino.jumps, 0);
+});
+
+test('museum pieces never duplicate, persist, and tolerate malformed or blocked storage',()=>{
+  const storage=new Map(),a=setup(1000,42,storage,false,true),pieces=new Set();
+  for(let i=0;i<16;i++)pieces.add(a.discovery.uncover());
+  assert.equal(pieces.size,16);assert.equal(a.discovery.uncover(),null);
+  assert.equal(setup(1000,1,storage,false,true).discovery.found.length,16);
+  assert.equal(setup(1000,1,new Map([['dino-jumper-museum-v1','{oops']]),false,true).discovery.found.length,0);
+  const blocked=new Map();blocked.set=()=>{throw Error('blocked');};assert.ok(setup(1000,1,blocked,false,true).discovery.uncover());
+});
+
+test('jump sound is optional and mute persists without requiring an audio device',()=>{
+  const storage=new Map(),a=setup(1000,1,storage,false,true);
+  a.discovery.sound();assert.equal(a.discovery.toggleSound(),true);a.discovery.sound(true);
+  assert.equal(setup(1000,1,storage,false,true).discovery.muted,true);
+});
+
+test('all six biome mutations render without changing speed or jump physics',()=>{
+  const a=setup(1000,1,new Map(),false,true),names=new Set();
+  for(let i=0;i<6;i++){a.game.mutations[0]=i;const theme=a.activeTheme();names.add(theme.name);a.draw();assert.equal(a.game.speed,500);assert.equal(a.dino.vy,0);}
+  assert.equal(names.size,6);
+});
+
+test('optional portals freeze the main world, allow declining, and return safely after failure',()=>{
+  const a=setup(1000,1,new Map(),false,true);a.game.shield=5;a.game.slow=3;
+  const old={x:500,y:250,w:30,h:42,type:'cactus'};a.game.obstacles.push(old);
+  assert.equal(a.offerPortal('traveler'),true);const distance=a.game.distance;
+  a.jump();assert.equal(a.dino.jumps,0);assert.equal(a.choosePortal(false),true);assert.equal(a.game.obstacles[0],old);
+  a.offerPortal('hidden');a.choosePortal(true);while(a.game.challenge)a.update(1/120);
+  assert.equal(a.game.challenge,null);assert.equal(a.game.revivesUsed,0);assert.equal(a.game.distance,distance);
+  assert.equal(a.game.shield,5);assert.equal(a.game.slow,3);assert.equal(a.game.obstacles[0],old);
+  assert.equal(a.discovery.found.length,0);
+});
+
+test('portal fossil arcs can be completed by four single jumps on desktop and mobile',()=>{
+  for(const width of [390,1000]){
+    const a=setup(width,42,new Map(),false,true);a.game.distance=4000;a.game.shield=0;
+    a.offerPortal('traveler');a.choosePortal(true);let next=1.12;
+    for(let time=0;time<9;time+=1/120){if(time>=next&&next<7){a.jump();next+=1.8;}a.update(1/120);}
+    assert.equal(a.game.challenge,null);assert.ok(a.game.bonus>=250,`viewport ${width}`);
+    assert.equal(a.discovery.found.length,1);assert.ok(a.game.shield>=10);assert.equal(a.game.revivesUsed,0);assert.equal(a.game.distance,4000);
+    a.finishPortal();assert.equal(a.discovery.found.length,1,'rewards cannot be claimed twice');
+  }
+});
+
+test('fossil trails grant a full-set bonus and keep individual rewards on a miss',()=>{
+  const a=setup(1000,1,new Map(),false,true);a.spawnFossilTrail();const tokens=[...a.game.pickups];
+  for(const p of tokens)a.collectPickup(p);
+  assert.equal(a.game.bonus,225);assert.equal(a.game.trail,null);assert.equal(a.game.runFossils,5);
+  const b=setup(1000,1,new Map(),false,true);b.spawnFossilTrail();b.collectPickup(b.game.pickups[0]);
+  b.game.pickups=[];b.update(.01);assert.equal(b.game.bonus,25);assert.equal(b.game.trail,null);
+});
+
+test('fossil trails follow a reachable single-jump arc at both speeds and widths',()=>{
+  for(const width of [390,1000])for(const speed of [500,920]){
+    let solved=false;
+    for(const lead of [.02,.06,.10,.14,.18,.22]){
+      const a=setup(width,1,new Map(),false,true);a.game.completed=true;a.game.nextBoss=Infinity;
+      a.game.distance=(speed-500)*32;a.game.speed=speed;a.game.nextObstacle=100;a.game.nextEvent=100;a.game.nextRoute=100;a.game.nextTrail=100;a.game.nextTraveler=100;
+      a.spawnFossilTrail();let jumped=false;
+      const arrival=(a.game.pickups[0].x-a.dino.x)/speed;
+      for(let t=0;t<arrival+1&&a.game.mode==='running';t+=1/120){if(!jumped&&t>=arrival-lead){a.jump();jumped=true;}a.update(1/120);}
+      if(a.game.runFossils===5){solved=true;break;}
+    }
+    assert.ok(solved,`trail ${width} / ${speed}`);
+  }
 });
 
 test('double jump can land on a secret ledge and collect its bonus', () => {

@@ -77,7 +77,7 @@ test('broken or blocked browser storage does not prevent tracking or gameplay',(
 });
 
 test('all page navigation and script/style assets exist in the static build',()=>{
-  for(const file of ['index.html','play.html','instructions.html','achievements.html']) {
+  for(const file of ['index.html','play.html','instructions.html','achievements.html','museum.html']) {
     const html=fs.readFileSync(path.join(__dirname,'..','dist',file),'utf8');
     for(const [,url]of html.matchAll(/(?:href|src)="([^"]+)"/g)){if(url.startsWith('#')||url.includes('://'))continue;const target=url.split('#')[0];assert.ok(fs.existsSync(path.join(__dirname,'..','dist',target)),`${file}: ${target}`);}
   }

@@ -1,5 +1,7 @@
 # Dino Jumper
 
+Optional discoveries: five-fossil jump trails grant a +100 completion bonus. Six rare biome mutations change only scenery and colors. A scarf-wearing traveler (or a hidden upper-route gate) offers an optional nine-second secret-biome challenge: collect 8 of 12 fossils in four jump arcs for +250 points, a shield, and one new museum piece. Main-world movement and effect timers freeze during the detour; failure spends no eggs. The museum (`museum.html`) saves 16 unique parts across four creatures in browser storage; ordinary fossils also have an 8% discovery chance. Jump sounds use synthesized Web Audio tones, with a persistent mute control. Boss reactions are cosmetic and do not increase difficulty.
+
 A small, dependency-free, classic-inspired dinosaur runner. Open `index.html` directly, or run `npm start` (or `node scripts/serve.js`) and visit http://localhost:3000.
 
 The home screen has three destinations: **Play game** (`play.html`), **Game rules** (`instructions.html`), and **Achievements** (`achievements.html`). The play screen keeps the title, game, and essential HUD. The rules have a quick start and five collapsible chapters, with direct topic links. Rules and achievement links on the play screen open in a new tab so the current run can stay paused.
