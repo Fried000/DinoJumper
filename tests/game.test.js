@@ -28,7 +28,7 @@ function setup(width = 1000, seed = 12345, storage = new Map(), withAchievements
   sandbox.Math=randomMath;
   const source = fs.readFileSync(require.resolve('../game.js'), 'utf8')
     .replace('  renderJournal();updateHUD();requestAnimationFrame(frame);',
-      '  globalThis.api = {game,dino,reset,jump,update,togglePause,spawnRoute,spawnBoss,playerBox,draw,score,frame,spawnObstacle,bossAttack,launchAttack,pixelDino,DUCK_DINO,BIOMES,BOSSES,UPGRADES,getBiome,continueExploring,journal,offerRevive,useRevive,chooseUpgrade,openUpgrade,startEvent,collectPickup,endRun,discover,updateHUD,phaseDash,synchronizeBiome,borderDistance,spawnFossilTrail,offerPortal,choosePortal,finishPortal,activeTheme};');
+      '  globalThis.api = {game,dino,reset,jump,update,togglePause,spawnRoute,spawnBoss,playerBox,draw,score,frame,spawnObstacle,bossAttack,launchAttack,pixelDino,DUCK_DINO,BIOMES,BOSSES,UPGRADES,getBiome,continueExploring,journal,offerRevive,useRevive,chooseUpgrade,openUpgrade,startEvent,collectPickup,endRun,discover,updateHUD,phaseDash,synchronizeBiome,borderDistance,spawnFossilTrail,offerPortal,choosePortal,finishPortal,activeTheme,spawnTerrain,terrainKind,gapUnderfoot};');
   vm.createContext(sandbox);
   if(withDiscovery)vm.runInContext(fs.readFileSync(require.resolve('../discovery.js'),'utf8'),sandbox);
   if(withAchievements) {
@@ -45,6 +45,22 @@ function setup(width = 1000, seed = 12345, storage = new Map(), withAchievements
     }
   };
   return { ...api, elements, events, draws, storage, achievements:sandbox.DinoAchievements, discovery:sandbox.window.DinoDiscovery };
+}
+
+function terrainControls(a,speed){
+  const incoming=a.game.terrain.filter(t=>t.x+t.w>a.dino.x+5);
+  const duck=incoming.some(t=>t.kind==='vine'&&t.x<a.dino.x+70);
+  a.events[duck?'keydown':'keyup']({code:'ArrowDown',preventDefault(){}});
+  for(const t of incoming){
+    if(t.kind==='vine')continue;
+    const lead=(t.x-(a.dino.x+(t.kind==='gap'?23:36)))/speed;
+    if(t.kind==='crystal'&&t.h>100){
+      if(!t.first&&lead<.65&&lead>0&&a.dino.grounded){a.jump();t.first=true;}
+      if(t.first&&!t.second&&lead<.29&&lead>0){a.jump();t.second=true;}
+    }else if(!t.first&&lead<(t.kind==='gap'?.14:.28)&&lead>-.03&&a.dino.grounded){a.jump();t.first=true;}
+    if(a.game.slow>0&&t.kind==='gap'&&t.w/speed>.55&&a.gapUnderfoot()===t&&a.dino.jumps===1&&a.dino.vy>120)a.jump();
+    if(a.game.slow>0&&t.kind!=='gap'&&t.first&&!t.second&&a.dino.jumps===1&&a.dino.vy>0){a.jump();t.second=true;}
+  }
 }
 
 test('two jumps are allowed, a third is blocked, and landing restores jumps', () => {
@@ -93,15 +109,55 @@ test('optional portals freeze the main world, allow declining, and return safely
   assert.equal(a.discovery.found.length,0);
 });
 
-test('portal fossil arcs can be completed by four single jumps on desktop and mobile',()=>{
-  for(const width of [390,1000]){
+test('all six portal survival trials are beatable on desktop and mobile',()=>{
+  for(const width of [390,1000])for(let variant=0;variant<6;variant++){
     const a=setup(width,42,new Map(),false,true);a.game.distance=4000;a.game.shield=0;
-    a.offerPortal('traveler');a.choosePortal(true);let next=1.12;
-    for(let time=0;time<9;time+=1/120){if(time>=next&&next<7){a.jump();next+=1.8;}a.update(1/120);}
-    assert.equal(a.game.challenge,null);assert.ok(a.game.bonus>=250,`viewport ${width}`);
+    a.offerPortal('traveler');a.choosePortal(true);a.game.challenge.variant=variant;
+    for(let time=0;time<12.1&&a.game.challenge;time+=1/120){terrainControls(a,330);a.update(1/120);}
+    assert.equal(a.game.challenge,null);assert.ok(a.game.bonus>=250,`viewport ${width}, variant ${variant}: ${a.game.message}`);
     assert.equal(a.discovery.found.length,1);assert.ok(a.game.shield>=10);assert.equal(a.game.revivesUsed,0);assert.equal(a.game.distance,4000);
     a.finishPortal();assert.equal(a.discovery.found.length,1,'rewards cannot be claimed twice');
   }
+});
+
+test('normal and mutated terrain sequences are traversable at both speeds, widths, and in slow motion',()=>{
+  for(const width of [390,1000])for(const speed of [500,920])for(const slow of [false,true])for(const hard of [false,true])for(const kind of ['void','lava','thorns','crystal','meteor','geyser']){
+    const a=setup(width,42,new Map(),false,true);a.game.distance=(speed-500)*32;a.game.speed=speed;
+    a.game.completed=true;a.game.nextBoss=Infinity;a.game.nextObstacle=100;a.game.nextEvent=100;a.game.nextRoute=100;a.game.nextTrail=100;a.game.nextTerrain=100;a.game.nextTraveler=100;a.game.revivesUsed=2;a.game.invincible=0;
+    a.spawnTerrain(kind,hard,speed);if(slow)a.game.slow=30;
+    for(let t=0;t<16&&a.game.terrain.length&&a.game.mode==='running';t+=1/120){terrainControls(a,a.game.speed*(slow?.58:1));a.update(1/120);if(t<.05)a.draw();}
+    assert.equal(a.game.mode,'running',`${width}/${speed}/${slow}/${hard}/${kind}`);assert.equal(a.game.terrain.length,0);assert.equal(a.game.shield,0);
+    assert.ok(a.game.bonus>=(hard?60:25),'clean passage gives its bonus');
+  }
+});
+
+test('void falls kill even with a shield or phase; reviving restores safe ground',()=>{
+  const a=setup(390,1,new Map(),false,true);a.game.nextObstacle=100;a.game.shield=10;a.game.invincible=100;
+  a.game.terrain=[{kind:'gap',x:0,w:3000,lava:false}];a.advance(.7);
+  assert.equal(a.game.mode,'revive');assert.ok(a.dino.y>360);assert.ok(a.game.shield>9,'the fall bypasses the shield instead of consuming it');
+  a.useRevive();assert.equal(a.game.terrain.length,0);assert.equal(a.dino.y,247);a.advance(.2);assert.equal(a.game.mode,'running');
+});
+
+test('biome borders retain old terrain and bosses wait until the last gap has passed',()=>{
+  const a=setup(390,1,new Map(),false,true);a.game.nextObstacle=100;a.game.invincible=100;
+  a.game.terrain=[{kind:'gap',x:500,w:100,biome:0,bg:'#fff',ink:'#555',faint:'#ddd'}];
+  const gap=a.game.terrain[0];a.game.distance=30000;a.synchronizeBiome();assert.equal(a.game.terrain[0],gap);
+  a.game.nextBoss=1000;a.update(.001);assert.equal(a.game.boss,null);
+  a.game.terrain=[];a.update(.001);assert.equal(a.game.boss.level,1);
+});
+
+test('all regular scenery families select themed terrain and mutations override their source biome',()=>{
+  const a=setup(1000,1,new Map(),false,true);const kinds=new Set(a.BIOMES.map(b=>a.terrainKind(b)));
+  assert.ok(kinds.size>=5);assert.equal(a.terrainKind(a.BIOMES[2]),'lava');
+  a.game.mutations[0]=0;assert.equal(a.terrainKind(),'void');assert.ok(a.activeTheme().obstacles.includes('crater'));
+  a.game.mutations[0]=5;assert.equal(a.terrainKind(),'lava');assert.ok(a.activeTheme().obstacles.includes('lava-rock'));
+});
+
+test('a traveler invitation cannot deadlock with a pending terrain passage',()=>{
+  const a=setup(1000,42,new Map(),false,true);a.game.terrainWaiting=true;a.game.nextTraveler=0;
+  a.game.travelerWaiting=true;a.game.obstacles=[];a.game.platforms=[];
+  a.update(.01);a.update(.01);assert.equal(a.game.mode,'portal-offer');
+  assert.equal(a.game.terrainWaiting,false);
 });
 
 test('fossil trails grant a full-set bonus and keep individual rewards on a miss',()=>{
@@ -338,16 +394,17 @@ test('exactly two revivals preserve progress, clear hazards, and cannot be bypas
   a.reset();assert.equal(a.game.revivesUsed,0);assert.equal(a.game.perks.magnet,0);
 });
 
-test('bosses arrive at fixed 1000-point milestones and fights are shorter than ten seconds', () => {
+test('bosses arrive at fixed 1000-point milestones and fights last nine to eleven seconds', () => {
   const a=setup();a.game.invincible=100;
   for(let level=1;level<=5;level++) {
     a.game.distance=(level*1000-a.game.bonus)*10;
     a.update(.0001);
     assert.equal(a.game.boss.level,level);assert.equal(a.game.nextBoss,(level+1)*1000);
     assert.equal(a.game.mode,'running');
-    assert.ok(a.game.boss.duration<10);
-    a.advance(a.game.boss.duration+.02);
+    assert.ok(a.game.boss.duration>=9&&a.game.boss.duration<=11);
+    const boss=a.game.boss;while(a.game.boss===boss&&a.game.mode==='running')a.update(1/120);
     assert.equal(a.game.boss,null);
+    if(a.game.mode==='upgrade')a.chooseUpgrade('skip');
   }
   assert.equal(a.game.mode,'won');assert.equal(a.journal.bosses.length,5);
 });
@@ -446,7 +503,7 @@ test('dragon arena pulses are survivable using the stone and crouch without prot
     const a=setup(width,seed);a.spawnBoss(4);a.game.bossesDefeated=3;a.game.nextBoss=Infinity;
     a.game.revivesUsed=2;a.game.invincible=0;a.game.distance=(speed-500)*32;a.game.speed=speed;
     const seen=new Set(),plans=[];let time=0,landed=false;
-    while(a.game.boss&&a.game.mode==='running'&&time<10){
+    while(a.game.boss&&a.game.mode==='running'&&time<13){
       for(const warning of a.game.warnings)if(!seen.has(warning)){
         seen.add(warning);assert.equal(warning.type,'terrain');plans.push({kind:warning.kind,impact:time+warning.delay,jumped:false});
       }
@@ -458,7 +515,7 @@ test('dragon arena pulses are survivable using the stone and crouch without prot
       assert.ok(a.game.obstacles.filter(o=>o.type==='terrain').length<=1,'arena pulses must not overlap');
     }
     assert.equal(a.game.mode,'upgrade',`width ${width}, speed ${speed}, seed ${seed}`);
-    assert.equal(a.game.boss,null);assert.equal(seen.size,3);assert.ok(landed,'single jump reaches the safe stone');
+    assert.equal(a.game.boss,null);assert.ok(seen.size>=3);assert.ok(landed,'single jump reaches the safe stone');
     assert.equal(a.game.shield,0);assert.equal(a.game.phaseCooldown,0);
   }
 });
@@ -667,7 +724,7 @@ test('complete laser fights are survivable using jump, double jump and crouch wi
     const a=setup(width,seed);a.game.bossesDefeated=1;a.spawnBoss(2);a.game.revivesUsed=2;a.game.invincible=0;a.game.nextBoss=Infinity;
     a.game.distance=(speed-500)*32;a.game.speed=speed;
     const seen=new Set(),actions=new Set(),plans=[];let time=0;
-    while(a.game.boss&&a.game.mode==='running'&&time<10) {
+    while(a.game.boss&&a.game.mode==='running'&&time<13) {
       for(const warning of a.game.warnings)if(!seen.has(warning)) {
         seen.add(warning);actions.add(warning.action);
         let action=warning.action;

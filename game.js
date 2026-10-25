@@ -64,14 +64,15 @@
   }
   const activeTheme=()=>{
     const base=getBiome(game.biome),variant=game.challenge?.variant??game.mutations?.[game.biome];
-    return variant===undefined?base:{...base,...discovery.mutations[variant],name:`${discovery.mutations[variant].name} · ${game.challenge?'SECRET GROTTO':base.name}`,mutation:variant};
+    const mutationObstacles=[['meteor','crater','crystal'],['pillar','urn','ruin'],['log','thorn','stump'],['crystal','basalt','ice'],['meteor','crater','crystal'],['basalt','lava-rock','vents']];
+    return variant===undefined?base:{...base,...discovery.mutations[variant],obstacles:mutationObstacles[variant],name:`${discovery.mutations[variant].name} · ${game.challenge?'SECRET GROTTO':base.name}`,mutation:variant};
   };
   const BOSSES = [
-    { name: 'BALL-SPITTING BIRD', duration: 7, interval: [.95,1.25], hint: 'MULTI-BALL VOLLEYS · LOW: JUMP / HIGH: DUCK' },
-    { name: 'PRISM TRICERATOPS', duration: 7.5, interval: [1.5,1.75], hint: 'LASER WARNING → DUCK / JUMP / DOUBLE JUMP · X TO PHASE' },
-    { name: 'QUARRY T. REX', duration: 8, interval: [1.65,1.9], hint: 'JUMP ROCKS → DUCK THEIR RETURN · TOWERS: DOUBLE JUMP' },
-    { name: 'VOLCANIC DRAGON', duration: 8.5, interval: [2.5,2.7], hint: 'LAVA: JUMP ON STONE · ASH CEILING: CROUCH ON GROUND' },
-    { name: 'SHADOW DINO', duration: 9, interval: [.8,1.05], hint: 'STACKED VOLLEYS · DELAYED ECHOES · FINAL RAGE' },
+    { name: 'BALL-SPITTING BIRD', duration: 9, interval: [.95,1.25], hint: 'MULTI-BALL VOLLEYS · LOW: JUMP / HIGH: DUCK' },
+    { name: 'PRISM TRICERATOPS', duration: 9.5, interval: [1.5,1.75], hint: 'LASER WARNING → DUCK / JUMP / DOUBLE JUMP · X TO PHASE' },
+    { name: 'QUARRY T. REX', duration: 10, interval: [1.65,1.9], hint: 'JUMP ROCKS → DUCK THEIR RETURN · TOWERS: DOUBLE JUMP' },
+    { name: 'VOLCANIC DRAGON', duration: 10.5, interval: [2.5,2.7], hint: 'LAVA: JUMP ON STONE · ASH CEILING: CROUCH ON GROUND' },
+    { name: 'SHADOW DINO', duration: 11, interval: [.8,1.05], hint: 'STACKED VOLLEYS · DELAYED ECHOES · FINAL RAGE' },
   ];
   const UPGRADES = [
     {id:'shell',name:'Longer Shield',max:4,describe:n=>`Shield pickups last ${10+(n-1)*2} → ${10+n*2} seconds. A shield still blocks one hit.`,summary:n=>`${10+n*2}s shields`},
@@ -135,7 +136,8 @@
     revivesUsed:0,fragments:0,runFossils:0,perks:newPerks(),upgradeOffers:[],wardActive:false,
     lastUpgradeBossCount:0,event:null,nextEvent:15,routeId:0,visitedRoute:-1,lastPattern:'',
     borderAnnounced:-1,previousBiome:0,biomeFade:0,phaseCooldown:0,phaseTrail:0,
-    mutations:{},nextTraveler:18,travelerWaiting:false,portalSource:null,challenge:null,nextTrail:6,trail:null,trailId:0 };
+    mutations:{},nextTraveler:18,travelerWaiting:false,portalSource:null,challenge:null,nextTrail:6,trail:null,trailId:0,
+    terrain:[],nextTerrain:5,terrainWaiting:false,terrainRun:null };
   const dino = { x: 105, y: GROUND - 45, w: 45, h: 45, vy: 0, jumps: 0, grounded: true, duck: false };
   let last = null;
   let duckKey = false;
@@ -183,7 +185,8 @@
       revivesUsed:0,fragments:0,runFossils:0,perks:newPerks(),upgradeOffers:[],wardActive:false,
       lastUpgradeBossCount:0,event:null,nextEvent:rand(5,8),routeId:0,visitedRoute:-1,lastPattern:'',
       borderAnnounced:-1,previousBiome:0,biomeFade:0,phaseCooldown:0,phaseTrail:0,
-      mutations:{},nextTraveler:18,travelerWaiting:false,portalSource:null,challenge:null,nextTrail:6,trail:null,trailId:0 });
+      mutations:{},nextTraveler:18,travelerWaiting:false,portalSource:null,challenge:null,nextTrail:6,trail:null,trailId:0,
+      terrain:[],nextTerrain:5,terrainWaiting:false,terrainRun:null });
     if(discovery&&Math.random()<.22)game.mutations[0]=Math.floor(Math.random()*discovery.mutations.length);
     Object.assign(dino, { y: GROUND - 45, vy: 0, jumps: 0, grounded: true, duck: false });
     duckKey = false;
@@ -273,6 +276,7 @@
     game.revivesUsed++;journal.revives++;
     achievement.record('revive',{score:score(),boss:game.boss?.level,fraction:game.boss?game.boss.age/game.boss.duration:0});
     game.obstacles=[];game.platforms=[];game.warnings=[];game.routeActive=false;
+    game.terrain=[];game.terrainWaiting=false;game.nextTerrain=3;game.terrainRun=null;
     game.invincible=2+game.perks.recovery;
     game.nextObstacle=1.3;
     if(game.boss){game.boss.shot=1.4;game.boss.echoes=[];}
@@ -383,48 +387,127 @@
     $('portal-offer').hidden=true;game.mode='running';last=null;
     if(!enter){game.nextObstacle=Math.max(game.nextObstacle,1);return true;}
     const saved={};
-    for(const key of ['obstacles','pickups','platforms','particles','event','trail','routeActive','message','messageTimer','biomeSign','phaseCooldown','phaseTrail'])saved[key]=game[key];
+    for(const key of ['obstacles','pickups','platforms','particles','event','trail','routeActive','message','messageTimer','biomeSign','phaseCooldown','phaseTrail','terrain','nextTerrain','terrainWaiting','terrainRun'])saved[key]=game[key];
     saved.dino={...dino};
     game.challenge={age:0,collected:0,spawned:0,variant:Math.floor(Math.random()*discovery.mutations.length),saved};
-    game.obstacles=[];game.pickups=[];game.platforms=[];game.particles=[];game.event=null;game.trail=null;game.routeActive=false;game.biomeSign=2.4;game.phaseTrail=0;
+    game.obstacles=[];game.pickups=[];game.platforms=[];game.particles=[];game.terrain=[];game.event=null;game.trail=null;game.routeActive=false;game.biomeSign=2.4;game.phaseTrail=0;game.nextTerrain=.25;
     Object.assign(dino,{y:GROUND-45,vy:0,jumps:0,grounded:true,duck:false});
     discover('secrets',`PORTAL · ${discovery.mutations[game.challenge.variant].name}`);
-    toast('SECRET GROTTO · COLLECT 8 / 12 · FOUR JUMP ARCS');return true;
+    toast('SECRET TRIAL · SURVIVE 12s · FOSSILS ARE BONUS LOOT');return true;
   }
   function finishPortal(){
     const challenge=game.challenge;if(!challenge)return;
-    const success=challenge.collected>=8,saved=challenge.saved;
+    const success=!challenge.failed&&challenge.age>=12,saved=challenge.saved;
     Object.assign(dino,saved.dino);delete saved.dino;Object.assign(game,saved);game.challenge=null;
     game.invincible=Math.max(game.invincible,1);game.nextObstacle=Math.max(game.nextObstacle,1);
     if(success){
-      game.bonus+=250;game.shield=Math.max(game.shield,10+game.perks.shell*2);
+      game.bonus+=250+challenge.collected*10;game.shield=Math.max(game.shield,10+game.perks.shell*2);
       const piece=discovery.uncover();
       discover('secrets','PORTAL CHALLENGE · COMPLETED');
-      toast(`PORTAL COMPLETE · +250 · SHIELD${piece?' · '+piece:' · MUSEUM COMPLETE'}`);
-    }else toast(`PORTAL ${challenge.collected}/8 · BACK TO YOUR RUN · NO EGGS LOST`);
+      toast(`TRIAL COMPLETE · +${250+challenge.collected*10} · SHIELD${piece?' · '+piece:' · MUSEUM COMPLETE'}`);
+    }else toast('TRIAL FAILED · BACK TO YOUR RUN · NO EGGS LOST');
     synchronizeBiome();saveJournal();
+  }
+  function terrainKind(theme=activeTheme()){
+    return theme.terrain||({volcano:'lava',space:'void',cave:'crystal',ruins:'crystal',city:'crystal',forest:'thorns',jungle:'thorns',swamp:'thorns',fungus:'geyser',snow:'geyser',canyon:'meteor',coast:'void',dune:'void',meadow:'thorns'})[theme.scenery]||'void';
+  }
+  function spawnTerrain(kind=terrainKind(),hard=activeTheme().mutation!==undefined,speed=game.speed){
+    game.terrainRun={clean:true,reward:hard?60:25};
+    const theme=activeTheme(),start=game.challenge?dino.x+speed*1.45:W+speed*.65;
+    const add=(kind,x,w,h=0)=>game.terrain.push({kind,x,w,h,y:GROUND-h,stage:'waiting',timer:0,biome:game.biome,bg:theme.bg,ink:theme.ink,faint:theme.faint});
+    const gap=(x,width,lava=false)=>{add('gap',x,width);game.terrain.at(-1).lava=lava;};
+    if(kind==='void'){
+      const count=hard?3:1,width=speed*(hard?.36:.28),island=speed*.54;
+      for(let i=0;i<count;i++)gap(start+i*(width+island),width);
+      toast(hard?'BLOCK VOID · THREE GAPS · LAND ON EACH ISLAND':'BROKEN GROUND · JUMP THE GAP');
+    }else if(kind==='lava'){
+      gap(start,speed*(hard?.48:.32),true);
+      add('volcano',start+speed*(hard?1.12:1),speed*.13,hard?82:62);
+      toast('LAVA LAKE → VOLCANO · JUMP AFTER THE WARNING');
+    }else if(kind==='thorns'){
+      add('vine',start,speed*.25,34);game.terrain.at(-1).y=GROUND-64;
+      add('root',start+speed*(hard?1.05:1.25),speed*.14,hard?52:38);
+      if(hard){add('vine',start+speed*2.1,speed*.3,34);game.terrain.at(-1).y=GROUND-64;}
+      toast('LIVING WOODS · DUCK VINES, THEN JUMP ROOTS');
+    }else if(kind==='crystal'){
+      add('crystal',start,speed*.13,hard?142:65);
+      if(hard)add('crystal',start+speed*1.6,speed*.13,130);
+      toast(hard?'CRYSTAL GATES · DOUBLE JUMP EACH TOWER':'RUINED GATE · JUMP');
+    }else{
+      const count=hard?3:1;
+      for(let i=0;i<count;i++)add(kind,start+i*speed*1.05,speed*.15,kind==='meteor'?38:hard?96:65);
+      toast(kind==='meteor'?'STARFALL · MARKED IMPACTS · JUMP THE ROCKS':'GEYSERS · WATCH THE GROUND WARNING, THEN JUMP');
+    }
+    game.nextObstacle=Math.max(game.nextObstacle,1.2);game.nextRoute=Math.max(game.nextRoute,4);game.nextEvent=Math.max(game.nextEvent,4);
+  }
+  function moveTerrain(dt,speed){
+    for(const t of game.terrain){
+      t.x-=speed*dt;
+      if(['volcano','geyser','meteor'].includes(t.kind)){
+        if(t.stage==='waiting'&&t.x-dino.x<speed*1.1){t.stage='warning';t.timer=t.kind==='meteor'?.45:.6;}
+        else if(t.stage==='warning'){
+          t.timer-=dt;
+          if(t.timer<=0){t.stage='active';if(t.kind==='meteor')t.y=GROUND-190;}
+        }else if(t.stage==='active'&&t.kind==='meteor')t.y=Math.min(GROUND-t.h,t.y+440*dt);
+      }
+    }
+    game.terrain=game.terrain.filter(t=>t.x+t.w>0);
+    if(!game.terrain.length&&game.terrainRun){
+      if(game.terrainRun.clean&&!game.challenge){game.bonus+=game.terrainRun.reward;toast(`CLEAN PASSAGE · +${game.terrainRun.reward}`);}
+      game.terrainRun=null;
+    }
+  }
+  function gapUnderfoot(){return game.terrain.find(t=>t.kind==='gap'&&dino.x+23>t.x&&dino.x+23<t.x+t.w);}
+  function terrainHit(){
+    if(game.challenge){game.challenge.failed=true;finishPortal();return true;}
+    achievement.record('hit',{shield:false,ward:false});
+    offerRevive();return true;
+  }
+  function checkTerrain(){
+    const gap=gapUnderfoot();
+    if((gap?.lava&&dino.y+dino.h>GROUND+5)||dino.y>H+20)return terrainHit();
+    const box=playerBox();
+    for(const t of game.terrain){
+      if(t.kind==='gap'||t.hit)continue;
+      if(t.kind==='meteor'&&t.stage!=='active')continue;
+      if(t.kind==='geyser'&&t.stage!=='active')continue;
+      const height=t.kind==='volcano'&&t.stage!=='active'?28:t.h;
+      const y=t.kind==='volcano'?GROUND-height:t.y;
+      if(intersects(box,{x:t.x+3,y:y+3,w:t.w-6,h:height-5})){
+        if(game.challenge){game.challenge.failed=true;finishPortal();return true;}
+        if(game.invincible<=0&&game.terrainRun)game.terrainRun.clean=false;
+        hurt(t);if(game.mode!=='running')return true;
+      }
+    }
+    return false;
   }
   function updateChallenge(dt){
     const c=game.challenge;c.age+=dt;game.time+=dt;
     game.messageTimer=Math.max(0,game.messageTimer-dt);game.biomeSign=Math.max(0,game.biomeSign-dt);
+    game.nextTerrain-=dt;
+    if(game.nextTerrain<=0&&!game.terrain.length&&c.age<9){spawnTerrain(terrainKind(),true,330);game.nextTerrain=.7;}
+    moveTerrain(dt,330);
     // Freeze the main world's score, hazards, effects, and boss milestones.
     while(c.spawned<12&&c.age>=.3+Math.floor(c.spawned/3)*1.8+(c.spawned%3)*.14){
       const t=.18+(c.spawned%3)*.14;
       game.pickups.push({x:W+40,y:GROUND-45+JUMP*t+.5*GRAVITY*t*t+20,w:23,h:23,type:'portal-token',vx:(W+40-dino.x)/1});c.spawned++;
     }
+    const oldBottom=dino.y+45;
     dino.vy+=GRAVITY*dt;dino.y+=dino.vy*dt;dino.grounded=false;
-    if(dino.y+45>=GROUND){dino.y=GROUND-45;dino.vy=0;dino.grounded=true;dino.jumps=0;}
+    if(dino.y+45>=GROUND&&!gapUnderfoot()&&oldBottom<=GROUND+3){dino.y=GROUND-45;dino.vy=0;dino.grounded=true;dino.jumps=0;}
     dino.duck=duckKey&&dino.grounded;
+    if(checkTerrain())return;
     for(const p of game.pickups){p.x-=p.vx*dt;if(intersects(playerBox(),p))collectPickup(p);}
     game.pickups=game.pickups.filter(p=>!p.collected&&p.x+p.w>0);
     for(const p of game.particles)p.life-=dt;game.particles=game.particles.filter(p=>p.life>0);
-    if(c.age>=9)finishPortal();
+    if(c.age>=12)finishPortal();
   }
   function spawnBoss(level = Math.min(5,game.bossesDefeated+1)) {
     const spec = BOSSES[level-1];
     game.boss = { ...spec, level, age: 0, shot: .8, x: W-145, y: 68, w: 88, h: 60, echoes: [], feints: 0, volley: 0, lastPattern:'',lastHigh:null,laneStreak:0,laserBag:[] };
     // Clear the runway so boss projectiles do not create unfair combinations.
     game.obstacles = [];
+    game.terrain=[];game.terrainWaiting=false;game.nextTerrain=4;game.terrainRun=null;
     game.platforms = [];
     game.pickups = [];
     game.warnings = [];
@@ -599,6 +682,7 @@
     dino.y += dino.vy*dt;
     dino.grounded = false;
     const dx = game.speed*worldDt;
+    moveTerrain(worldDt,game.speed);
     for (const platform of game.platforms) {
       if(!platform.fixed)platform.x -= dx;
       if(platform.expires!==undefined){platform.expires-=worldDt;if(platform.expires<=0)continue;}
@@ -616,14 +700,15 @@
         if (!platform.fixed&&!game.routeActive) { game.routeActive = true; toast('UPPER ROUTE'); }
       }
     }
-    if (dino.y+dino.h >= GROUND) {
+    if (dino.y+dino.h >= GROUND && oldBottom<=GROUND+3 && !gapUnderfoot()) {
       dino.y = GROUND-dino.h; dino.vy = 0; dino.grounded = true; dino.jumps = 0;
       game.routeActive = false;
     }
     if (dino.grounded) dino.duck = duckKey;
+    if(checkTerrain())return;
     game.platforms = game.platforms.filter(p=>p.x+p.w>0 && (p.expires===undefined||p.expires>0) && (p.crumble===undefined||p.crumble===null||p.crumble>0));
 
-    if (!game.boss && !game.completed && score() >= game.nextBoss && !game.obstacles.some(o=>!o.hit&&o.x+o.w>0)) {
+    if (!game.boss && !game.completed && score() >= game.nextBoss && !game.terrain.length && !game.obstacles.some(o=>!o.hit&&o.x+o.w>0)) {
       game.nextBoss += 1000;
       spawnBoss();
     }
@@ -665,16 +750,27 @@
         else if(game.bossesDefeated%2===0&&game.lastUpgradeBossCount<game.bossesDefeated) {openUpgrade();return;}
       }
     } else {
+      const terrainBorderClear=borderDistance()>750;
+      if(!terrainBorderClear||bossApproach)game.terrainWaiting=false;
+      if(discovery&&terrainBorderClear&&!bossApproach&&!game.travelerWaiting){
+        game.nextTerrain-=worldDt;
+        if(game.nextTerrain<=0&&!game.event&&!game.trail&&!game.platforms.length)game.terrainWaiting=true;
+        if(game.terrainWaiting&&!game.obstacles.length&&!game.terrain.length&&!game.platforms.length){
+          spawnTerrain();game.terrainWaiting=false;game.nextTerrain=activeTheme().mutation===undefined?rand(9,13):rand(5,7);
+        }
+      }
+      const terrainBusy=game.terrainWaiting||game.terrain.length>0;
       game.nextEvent-=worldDt;
       if(game.event) {game.event.left-=worldDt;if(game.event.left<=0){achievement.record('eventWin',{kind:game.event.kind});game.event=null;}}
-      if(game.nextEvent<=0&&!game.event&&!nearBorder&&!bossApproach){startEvent();game.nextEvent=rand(16,24);}
+      if(game.nextEvent<=0&&!game.event&&!nearBorder&&!bossApproach&&!terrainBusy){startEvent();game.nextEvent=rand(16,24);}
       game.nextObstacle -= worldDt;
-      if (game.nextObstacle<=0&&!nearBorder&&!bossApproach&&!game.travelerWaiting) { spawnObstacle(); game.nextObstacle=rand(.78,1.35); }
+      if (game.nextObstacle<=0&&!nearBorder&&!bossApproach&&!game.travelerWaiting&&!terrainBusy) { spawnObstacle(); game.nextObstacle=rand(.78,1.35); }
       if(discovery&&!nearBorder&&!bossApproach){
         game.nextTraveler-=worldDt;game.nextTrail-=worldDt;
         if(game.nextTraveler<=0)game.travelerWaiting=true;
-        if(game.travelerWaiting&&!game.obstacles.length&&!game.platforms.length){offerPortal('traveler');return;}
-        if(game.nextTrail<=0&&!game.trail&&!game.travelerWaiting){spawnFossilTrail();game.nextTrail=rand(18,25);}
+        if(game.travelerWaiting&&!game.terrain.length)game.terrainWaiting=false;
+        if(game.travelerWaiting&&!game.obstacles.length&&!game.platforms.length&&!terrainBusy){offerPortal('traveler');return;}
+        if(game.nextTrail<=0&&!game.trail&&!game.travelerWaiting&&!terrainBusy){spawnFossilTrail();game.nextTrail=rand(18,25);}
       }
       game.nextPickup -= worldDt;
       if (game.nextPickup<=0) {
@@ -683,7 +779,7 @@
         game.nextPickup=rand(11,15);
       }
       game.nextRoute -= worldDt;
-      if (game.nextRoute<=0 && !game.platforms.length && borderDistance()>650 && (game.completed||score()<game.nextBoss-400)) { spawnRoute(); game.nextRoute=rand(22,28); }
+      if (game.nextRoute<=0 && !game.travelerWaiting && !terrainBusy && !game.platforms.length && borderDistance()>650 && (game.completed||score()<game.nextBoss-400)) { spawnRoute(); game.nextRoute=rand(22,28); }
     }
     const box = playerBox();
     for (const obstacle of game.obstacles) {
@@ -734,12 +830,14 @@
     const theme = activeTheme();
     $('biome').textContent = `${String(game.biome+1).padStart(2,'0')} / ${theme.name}`;
     $('score').textContent = `HI ${pad(Math.max(high,score()))}   ${pad(score())}`;
-    $('status').textContent = {ready:'READY TO RUN',running:game.challenge?`PORTAL · ${game.challenge.collected} / 8 · ${Math.max(0,Math.ceil(9-game.challenge.age))}s`:game.boss?`BOSS ${game.boss.level} / 5`:game.completed?'ENDLESS FRONTIER':'ON THE MOVE',paused:'TAKING A BREATHER',over:'UNTIL NEXT TIME',won:'GAUNTLET COMPLETE',revive:'AN EGG CAN BRING YOU BACK',upgrade:'CHOOSE A PERK','portal-offer':'AN OPTIONAL DETOUR'}[game.mode];
+    $('status').textContent = {ready:'READY TO RUN',running:game.challenge?`SURVIVE · ${game.challenge.collected} FOSSILS · ${Math.max(0,Math.ceil(12-game.challenge.age))}s`:game.boss?`BOSS ${game.boss.level} / 5`:game.completed?'ENDLESS FRONTIER':'ON THE MOVE',paused:'TAKING A BREATHER',over:'UNTIL NEXT TIME',won:'GAUNTLET COMPLETE',revive:'AN EGG CAN BRING YOU BACK',upgrade:'CHOOSE A PERK','portal-offer':'AN OPTIONAL DETOUR'}[game.mode];
     const effects = [];
     if (game.shield>0) effects.push(`SHIELD ${Math.ceil(game.shield)}s`);
     if (game.slow>0) effects.push(`SLOW ${Math.ceil(game.slow)}s`);
     if(game.trail)effects.push(`TRAIL ${game.trail.collected}/${game.trail.total} · +100`);
-    if(game.challenge)effects.push(`COLLECT ${game.challenge.collected}/8 · ${Math.max(0,Math.ceil(9-game.challenge.age))}s`);
+    if(game.challenge)effects.push(`SURVIVE · LOOT ${game.challenge.collected} · ${Math.max(0,Math.ceil(12-game.challenge.age))}s`);
+    const terrainWarning=game.terrain.find(t=>t.stage==='warning'&&t.x<W);
+    if(terrainWarning)effects.push(`${terrainWarning.kind==='meteor'?'IMPACT':'ERUPTION'} IN ${terrainWarning.timer.toFixed(1)}s`);
     $('effect').textContent = effects.join(' / ') || (borderDistance()<=BORDER_APPROACH?`NEXT: ${getBiome(game.biome+1).name}`:game.event?.name||'');
     $('route-status').textContent = game.routeActive?'UPPER ROUTE':'';
     $('eggs').textContent=`${2-game.revivesUsed} / 2 revives left`;
@@ -1042,6 +1140,7 @@
       const x=((i*73-game.distance)%1100+1100)%1100;
       ctx.fillRect(x,GROUND+7+(i*13)%23,2+i%5,1);
     }
+    drawTerrain(theme);
     for(const p of game.platforms) {
       ctx.globalAlpha=p.crumble!==undefined && p.crumble!==null?Math.max(.2,p.crumble/.85):1;
       ctx.setLineDash([5,4]);ctx.strokeRect(Math.round(p.x),p.y,p.w,5);ctx.setLineDash([]);
@@ -1112,6 +1211,48 @@
       if(theme.mutation===3){ctx.beginPath();ctx.moveTo(x,GROUND);ctx.lineTo(x+12,GROUND-60-i*4);ctx.lineTo(x+26,GROUND);ctx.closePath();ctx.stroke();}
       if(theme.mutation===4){ctx.fillRect(x,y,3,3);ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+24,y-14);ctx.stroke();}
       if(theme.mutation===5){ctx.fillRect(x,y,4,4);ctx.fillRect(x+5,y+7,2,2);}
+    }
+    ctx.restore();
+  }
+  function drawTerrain(theme){
+    ctx.save();
+    if(terrainKind(theme)==='void'||terrainKind(theme)==='crystal'){
+      ctx.strokeStyle=theme.faint;
+      for(let x=-game.distance%32;x<W;x+=32){ctx.strokeRect(x,GROUND+1,32,30);ctx.strokeRect(x+16,GROUND+31,32,32);}
+    }
+    for(const t of game.terrain){
+      const x=Math.round(t.x);ctx.fillStyle=t.ink;ctx.strokeStyle=t.ink;
+      if(t.kind==='gap'){
+        ctx.fillStyle=t.bg;ctx.fillRect(x,GROUND-1,t.w,H-GROUND+2);
+        ctx.fillStyle=t.lava?'#c36e3d':'#292c40';ctx.fillRect(x,GROUND+6,t.w,H-GROUND);
+        ctx.fillStyle=t.lava?'#e8a452':'#72738b';
+        for(let i=0;i<t.w;i+=28)ctx.fillRect(x+i,GROUND+7+(t.lava?Math.sin(i+game.time*3)*3:12),18,t.lava?4:2);
+        ctx.fillStyle=t.ink;ctx.fillRect(x-10,GROUND,10,H-GROUND);ctx.fillRect(x+t.w,GROUND,10,H-GROUND);
+        ctx.font='9px Consolas,monospace';ctx.textAlign='center';ctx.fillText(t.lava?'LAVA':'VOID',x+t.w/2,GROUND+48);
+        continue;
+      }
+      if(t.kind==='vine'){
+        ctx.fillRect(x,t.y,t.w,t.h-8);for(let i=0;i<t.w;i+=17)ctx.fillRect(x+i,t.y+t.h-8,6,8);
+        ctx.globalAlpha=.3;ctx.fillRect(x+10,100,3,t.y-100);ctx.globalAlpha=1;
+      }else if(t.kind==='root'){
+        ctx.fillRect(x,t.y,t.w,t.h);ctx.fillStyle=t.bg;ctx.fillRect(x+5,t.y+8,t.w-10,3);
+      }else if(t.kind==='crystal'){
+        ctx.fillRect(x,t.y,t.w,t.h);ctx.fillStyle=t.bg;ctx.fillRect(x+t.w*.45,t.y+6,3,t.h-12);
+        ctx.strokeStyle=t.faint;for(let y=t.y+24;y<GROUND;y+=24)ctx.strokeRect(x,y,t.w,1);
+      }else if(t.kind==='volcano'){
+        ctx.beginPath();ctx.moveTo(x,GROUND);ctx.lineTo(x+t.w*.3,GROUND-28);ctx.lineTo(x+t.w*.7,GROUND-28);ctx.lineTo(x+t.w,GROUND);ctx.closePath();ctx.fill();
+        if(t.stage==='active'){ctx.fillStyle='#c36e3d';ctx.fillRect(x,GROUND-t.h,t.w,t.h-23);ctx.fillStyle='#efb768';for(let i=0;i<3;i++)ctx.fillRect(x+4+i*t.w/3,GROUND-t.h-5+(i%2)*10,5,10);}
+      }else if(t.kind==='geyser'){
+        ctx.fillRect(x,GROUND-5,t.w,5);
+        if(t.stage==='active'){for(let y=GROUND-t.h;y<GROUND;y+=15)ctx.fillRect(x+(Math.floor(y/15)%2)*3,y,t.w-3,12);}
+      }else if(t.kind==='meteor'){
+        if(t.stage==='active'){ctx.fillRect(x,t.y,t.w,t.h);ctx.globalAlpha=.25;ctx.fillRect(x+7,t.y-25,t.w-14,23);ctx.globalAlpha=1;}
+        else {ctx.globalAlpha=.35;ctx.fillRect(x,GROUND-3,t.w,3);ctx.globalAlpha=1;}
+      }
+      if(t.stage==='warning'){
+        ctx.strokeStyle='#ad785a';ctx.setLineDash([4,4]);ctx.strokeRect(x,GROUND-t.h,t.w,t.h);ctx.setLineDash([]);
+        ctx.fillStyle='#98613e';ctx.font='bold 16px Consolas,monospace';ctx.textAlign='center';ctx.fillText('!',x+t.w/2,GROUND-t.h-10);
+      }
     }
     ctx.restore();
   }

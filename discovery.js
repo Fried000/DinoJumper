@@ -13,12 +13,12 @@
     const [id,part]=piece.split(':');return specimens.find(s=>s[0]===id)[1]+' · '+part;
   }
   const mutations=[
-    {name:'MOON MIRAGE',bg:'#edf0fa',ink:'#555973',faint:'#cdd2e5'},
-    {name:'FOSSIL BLOOM',bg:'#faf6e9',ink:'#79684e',faint:'#e2d7b9'},
-    {name:'WATCHFUL WOODS',bg:'#edf4ed',ink:'#4c6755',faint:'#cbdccc'},
-    {name:'CRYSTAL ECHO',bg:'#f4edfa',ink:'#70567d',faint:'#dfcfe8'},
-    {name:'STARFALL',bg:'#eaf2f8',ink:'#506677',faint:'#c8dce7'},
-    {name:'EMBER GARDEN',bg:'#fcf0ea',ink:'#825f52',faint:'#ead3c5'},
+    {name:'BLOCK VOID',bg:'#edf0fa',ink:'#555973',faint:'#cdd2e5',scenery:'space',terrain:'void',subtitle:'BROKEN BLOCK ISLANDS · JUMP THE VOID'},
+    {name:'BONEWORKS',bg:'#faf6e9',ink:'#79684e',faint:'#e2d7b9',scenery:'ruins',terrain:'geyser',subtitle:'BURIED BONES · WARNED FOSSIL GEYSERS'},
+    {name:'WATCHFUL WOODS',bg:'#edf4ed',ink:'#4c6755',faint:'#cbdccc',scenery:'forest',terrain:'thorns',subtitle:'LOW VINES: DUCK · ROOTS: JUMP'},
+    {name:'CRYSTAL ECHO',bg:'#f4edfa',ink:'#70567d',faint:'#dfcfe8',scenery:'cave',terrain:'crystal',subtitle:'TALL CRYSTAL GATES · DOUBLE JUMP'},
+    {name:'STARFALL',bg:'#eaf2f8',ink:'#506677',faint:'#c8dce7',scenery:'space',terrain:'meteor',subtitle:'WATCH THE IMPACT MARKERS · JUMP METEORS'},
+    {name:'LAVA CALDERA',bg:'#fcf0ea',ink:'#825f52',faint:'#ead3c5',scenery:'volcano',terrain:'lava',subtitle:'LAVA LAKES · ERUPTING VOLCANOES'},
   ];
   let muted=false,audio;
   try{muted=localStorage.getItem('dino-jumper-muted')==='true';}catch{}
