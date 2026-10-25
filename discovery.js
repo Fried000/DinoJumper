@@ -1,5 +1,9 @@
 (() => {
   'use strict';
+  function random(){
+    try{if(window.crypto?.getRandomValues){const values=new Uint32Array(1);window.crypto.getRandomValues(values);return values[0]/4294967296;}}catch{}
+    return Math.random();
+  }
   const specimens=[['suncrest','Suncrest Raptor','A swift little hunter with a crown of feathers.'],['moonwing','Moonwing Pterosaur','Its wings once crossed the moonlit sea.'],['mossback','Mossback Giant','A gentle giant that carried a forest on its back.'],['emberjaw','Emberjaw Dragon','An ancient cousin of the volcano guardian.']];
   const parts=['skull','spine','limbs','tail'];
   const key='dino-jumper-museum-v1';
@@ -8,7 +12,7 @@
   function uncover(){
     const pool=specimens.flatMap(([id])=>parts.map(p=>id+':'+p)).filter(p=>!found.includes(p));
     if(!pool.length)return null;
-    const piece=pool[Math.floor(Math.random()*pool.length)];found.push(piece);
+    const piece=pool[Math.floor(random()*pool.length)];found.push(piece);
     try{localStorage.setItem(key,JSON.stringify(found));}catch{}
     const [id,part]=piece.split(':');return specimens.find(s=>s[0]===id)[1]+' · '+part;
   }
@@ -35,5 +39,5 @@
     }catch{}
   }
   function toggleSound(){muted=!muted;try{localStorage.setItem('dino-jumper-muted',String(muted));}catch{}return muted;}
-  window.DinoDiscovery={specimens,parts,mutations,uncover,sound,toggleSound,get muted(){return muted;},get found(){return [...found];}};
+  window.DinoDiscovery={random,specimens,parts,mutations,uncover,sound,toggleSound,get muted(){return muted;},get found(){return [...found];}};
 })();

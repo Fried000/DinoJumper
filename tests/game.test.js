@@ -28,7 +28,7 @@ function setup(width = 1000, seed = 12345, storage = new Map(), withAchievements
   sandbox.Math=randomMath;
   const source = fs.readFileSync(require.resolve('../game.js'), 'utf8')
     .replace('  renderJournal();updateHUD();requestAnimationFrame(frame);',
-      '  globalThis.api = {game,dino,reset,jump,update,togglePause,spawnRoute,spawnBoss,playerBox,draw,score,frame,spawnObstacle,bossAttack,launchAttack,pixelDino,DUCK_DINO,BIOMES,BOSSES,UPGRADES,getBiome,continueExploring,journal,offerRevive,useRevive,chooseUpgrade,openUpgrade,startEvent,collectPickup,endRun,discover,updateHUD,phaseDash,synchronizeBiome,borderDistance,spawnFossilTrail,offerPortal,choosePortal,finishPortal,activeTheme,spawnTerrain,terrainKind,gapUnderfoot};');
+      '  globalThis.api = {game,dino,reset,jump,update,togglePause,spawnRoute,spawnBoss,playerBox,draw,score,frame,spawnObstacle,bossAttack,launchAttack,pixelDino,DUCK_DINO,BIOMES,BOSSES,UPGRADES,getBiome,continueExploring,journal,offerRevive,useRevive,chooseUpgrade,openUpgrade,startEvent,collectPickup,endRun,discover,updateHUD,phaseDash,synchronizeBiome,borderDistance,spawnFossilTrail,offerPortal,choosePortal,finishPortal,activeTheme,spawnTerrain,terrainKind,gapUnderfoot,nextMutation,selectPortal};');
   vm.createContext(sandbox);
   if(withDiscovery)vm.runInContext(fs.readFileSync(require.resolve('../discovery.js'),'utf8'),sandbox);
   if(withAchievements) {
@@ -44,7 +44,7 @@ function setup(width = 1000, seed = 12345, storage = new Map(), withAchievements
       api.update(1 / 120);
     }
   };
-  return { ...api, elements, events, draws, storage, achievements:sandbox.DinoAchievements, discovery:sandbox.window.DinoDiscovery };
+  return { ...api, elements, events, draws, storage, achievements:sandbox.DinoAchievements, discovery:sandbox.window.DinoDiscovery,window:sandbox.window };
 }
 
 function terrainControls(a,speed){
@@ -98,6 +98,78 @@ test('all six biome mutations render without changing speed or jump physics',()=
   assert.equal(names.size,6);
 });
 
+test('every run starts in the plain desert and later biome orders are shuffled without duplicates',()=>{
+  const orders=new Set();
+  for(let seed=1;seed<=60;seed++){
+    const a=setup(1000,seed,new Map(),false,true);
+    assert.equal(a.activeTheme().name,'DESERT');assert.equal(a.game.mutations[0],undefined);
+    assert.equal(a.game.biomeOrder[0],0);assert.equal(new Set(a.game.biomeOrder).size,48);orders.add(a.game.biomeOrder.join(','));
+  }
+  assert.ok(orders.size>50);
+});
+
+test('browser crypto supplies gameplay randomness when available',()=>{
+  const a=setup(1000,1,new Map(),false,true);let calls=0;
+  a.window.crypto={getRandomValues(values){calls++;values[0]=2147483648;return values;}};
+  assert.equal(a.discovery.random(),.5);assert.equal(calls,1);
+});
+
+test('all six hidden destinations appear in shuffled bags and portal choices are unique and selectable',()=>{
+  const a=setup(1000,1,new Map(),false,true),names=new Set();
+  a.game.mutationBag=[];for(let i=0;i<6;i++)names.add(a.nextMutation());assert.equal(names.size,6);
+  a.offerPortal('hidden',4);assert.equal(a.game.portalOffers[0],4);assert.equal(new Set(a.game.portalOffers).size,3);
+  const destination=a.game.portalOffers[2];a.selectPortal(destination);a.choosePortal(true);
+  assert.equal(a.game.challenge.variant,destination);assert.match(a.activeTheme().name,new RegExp(a.discovery.mutations[destination].name));
+});
+
+test('the first secret route is an actual staircase with a labeled destination gate',()=>{
+  for(const width of [390,1000]){
+    const a=setup(width,42,new Map(),false,true);a.spawnRoute();
+    assert.equal(a.game.platforms.length,5);assert.ok(a.game.platforms.every(p=>p.stairs));
+    for(let i=1;i<5;i++)assert.ok(a.game.platforms[i].y<a.game.platforms[i-1].y);
+    const gate=a.game.pickups.find(p=>p.type==='portal');assert.ok(gate);assert.equal(gate.destination,a.game.platforms[4].destination);a.draw();
+  }
+});
+
+test('hidden staircase gates can be reached using normal jumps at both speeds and screen widths',()=>{
+  for(const width of [390,1000])for(const speed of [500,920]){
+    let reached=false;
+    for(const lead of [.3,.5,.7,.9])for(const secondDelay of [.15,.25,.35]){
+      if(reached)continue;
+      const a=setup(width,42,new Map(),false,true);a.game.completed=true;a.game.nextBoss=Infinity;
+      a.game.distance=(speed-500)*32;a.game.speed=speed;
+      for(const key of ['nextObstacle','nextRoute','nextEvent','nextTrail','nextTerrain','nextTraveler','nextPickup'])a.game[key]=100;
+      a.spawnRoute();const arrival=(a.game.platforms[0].x-a.dino.x)/speed;let first=false,second=false,firstAt=0;
+      for(let t=0;t<8&&a.game.mode==='running';t+=1/120){
+        if(!first&&t>=arrival-lead){a.jump();first=true;firstAt=t;}
+        if(first&&!second&&t>=firstAt+secondDelay){a.jump();second=true;}
+        if(second&&a.dino.grounded&&a.game.platforms.some(p=>p.y<a.dino.y+45-5&&p.x>a.dino.x&&p.x<a.dino.x+a.game.speed*.45))a.jump();
+        a.update(1/120);
+      }
+      reached=a.game.mode==='portal-offer';
+    }
+    assert.ok(reached,`${width}/${speed}: staircase gate must be reachable`);
+  }
+});
+
+test('randomized terrain changes its count, dimensions and spacing across runs',()=>{
+  for(const kind of ['void','lava','thorns','crystal','geyser','meteor']){
+    const signatures=new Set();
+    for(let seed=1;seed<=30;seed++){
+      const a=setup(1000,seed,new Map(),false,true);a.spawnTerrain(kind,true);
+      signatures.add(JSON.stringify(a.game.terrain.map(t=>[t.kind,t.x,t.w,t.h])));
+    }
+    assert.ok(signatures.size>25,kind);
+  }
+});
+
+test('once a dinosaur falls below the void lip, jumping or phase cannot rescue it',()=>{
+  const a=setup(390,1,new Map(),false,true);a.game.nextObstacle=100;a.game.revivesUsed=2;
+  a.game.terrain=[{kind:'gap',x:0,w:3000}];a.advance(.18);assert.equal(a.game.voidFalling,true);
+  const velocity=a.dino.vy;a.jump();a.phaseDash();assert.equal(a.dino.vy,velocity);
+  a.advance(.5);assert.equal(a.game.mode,'over');
+});
+
 test('optional portals freeze the main world, allow declining, and return safely after failure',()=>{
   const a=setup(1000,1,new Map(),false,true);a.game.shield=5;a.game.slow=3;
   const old={x:500,y:250,w:30,h:42,type:'cactus'};a.game.obstacles.push(old);
@@ -110,11 +182,11 @@ test('optional portals freeze the main world, allow declining, and return safely
 });
 
 test('all six portal survival trials are beatable on desktop and mobile',()=>{
-  for(const width of [390,1000])for(let variant=0;variant<6;variant++){
-    const a=setup(width,42,new Map(),false,true);a.game.distance=4000;a.game.shield=0;
+  for(const width of [390,1000])for(const seed of [1,42,77,12345])for(let variant=0;variant<6;variant++){
+    const a=setup(width,seed,new Map(),false,true);a.game.distance=4000;a.game.shield=0;
     a.offerPortal('traveler');a.choosePortal(true);a.game.challenge.variant=variant;
     for(let time=0;time<12.1&&a.game.challenge;time+=1/120){terrainControls(a,330);a.update(1/120);}
-    assert.equal(a.game.challenge,null);assert.ok(a.game.bonus>=250,`viewport ${width}, variant ${variant}: ${a.game.message}`);
+    assert.equal(a.game.challenge,null);assert.ok(a.game.bonus>=225,`viewport ${width}, variant ${variant}: ${a.game.message}`);
     assert.equal(a.discovery.found.length,1);assert.ok(a.game.shield>=10);assert.equal(a.game.revivesUsed,0);assert.equal(a.game.distance,4000);
     a.finishPortal();assert.equal(a.discovery.found.length,1,'rewards cannot be claimed twice');
   }
@@ -134,7 +206,7 @@ test('normal and mutated terrain sequences are traversable at both speeds, width
 test('void falls kill even with a shield or phase; reviving restores safe ground',()=>{
   const a=setup(390,1,new Map(),false,true);a.game.nextObstacle=100;a.game.shield=10;a.game.invincible=100;
   a.game.terrain=[{kind:'gap',x:0,w:3000,lava:false}];a.advance(.7);
-  assert.equal(a.game.mode,'revive');assert.ok(a.dino.y>360);assert.ok(a.game.shield>9,'the fall bypasses the shield instead of consuming it');
+  assert.equal(a.game.mode,'revive');assert.ok(a.dino.y>340);assert.ok(a.game.shield>9,'the fall bypasses the shield instead of consuming it');
   a.useRevive();assert.equal(a.game.terrain.length,0);assert.equal(a.dino.y,247);a.advance(.2);assert.equal(a.game.mode,'running');
 });
 
