@@ -170,7 +170,7 @@ test('once a dinosaur falls below the void lip, jumping or phase cannot rescue i
   a.advance(.5);assert.equal(a.game.mode,'over');
 });
 
-test('optional portals freeze the main world, allow declining, and return safely after failure',()=>{
+test('portal death ends the entire run despite unused eggs and shields',()=>{
   const a=setup(1000,1,new Map(),false,true);a.game.shield=5;a.game.slow=3;
   const old={x:500,y:250,w:30,h:42,type:'cactus'};a.game.obstacles.push(old);
   assert.equal(a.offerPortal('traveler'),true);const distance=a.game.distance;
@@ -178,7 +178,7 @@ test('optional portals freeze the main world, allow declining, and return safely
   a.offerPortal('hidden');a.choosePortal(true);while(a.game.challenge)a.update(1/120);
   assert.equal(a.game.challenge,null);assert.equal(a.game.revivesUsed,0);assert.equal(a.game.distance,distance);
   assert.equal(a.game.shield,5);assert.equal(a.game.slow,3);assert.equal(a.game.obstacles[0],old);
-  assert.equal(a.discovery.found.length,0);
+  assert.equal(a.discovery.found.length,0);assert.equal(a.game.mode,'over');a.useRevive();assert.equal(a.game.mode,'over');
 });
 
 test('all six portal survival trials are beatable on desktop and mobile',()=>{
@@ -319,7 +319,7 @@ test('boss arrival waits for old hazards to leave, then generates shots and rewa
   a.game.invincible = 30;
   a.advance(4);
   assert.ok(a.game.obstacles.some(o => o.type === 'ball'));
-  a.advance(a.BOSSES[0].duration-3.9);
+  a.advance(a.game.boss.duration-a.game.boss.age+.01);
   assert.equal(a.game.boss, null);
   assert.equal(a.game.bonus, 50);
 });
@@ -395,7 +395,7 @@ test('speed starts at 500, rises quickly, and is capped at 920', () => {
 
 test('all five bosses have distinct attacks, warnings, increasing duration and rewards', () => {
   const a=setup();
-  const expected=[['ball'],['laser'],['siege-rock'],['terrain'],['boulder','fireball','ball']];
+  const expected=[['ball'],['laser'],['siege-rock'],['terrain'],['mirror','laser']];
   let previousDuration=0;
   for(let level=1;level<=5;level++) {
     a.game.nextBoss=Infinity;a.spawnBoss();const boss=a.game.boss;
@@ -429,13 +429,13 @@ test('bird chooses six non-repeating multi-ball patterns with random cooldowns',
     assert.notEqual(a.game.boss.lastPattern,lastPattern);lastPattern=a.game.boss.lastPattern;
     patterns.add(lastPattern);assert.ok(a.game.boss.laneStreak<=2);
     assert.ok(a.game.warnings.length>=2);
-    a.game.warnings.forEach(w=>{lanes.add(w.high);timings.add(w.spacing||0);assert.equal(w.delay,.45);});
+    a.game.warnings.forEach(w=>{lanes.add(w.high);timings.add(w.spacing||0);assert.ok(w.delay>=.45&&w.delay<=.53);});
     burst=true;
   }
   assert.equal(lanes.size,2);assert.ok(burst);assert.ok(timings.size>1);
   assert.equal(patterns.size,6);
   a.game.warnings=[];a.game.boss.shot=0;a.update(.01);
-  assert.ok(a.game.boss.shot>=.95 && a.game.boss.shot<=1.25);
+  assert.ok(a.game.boss.shot>=.92 && a.game.boss.shot<=1.23);
   const intervals=new Set();
   for(let i=0;i<20;i++) {
     a.game.warnings=[];a.game.obstacles=[];a.game.boss.shot=0;
@@ -466,14 +466,14 @@ test('exactly two revivals preserve progress, clear hazards, and cannot be bypas
   a.reset();assert.equal(a.game.revivesUsed,0);assert.equal(a.game.perks.magnet,0);
 });
 
-test('bosses arrive at fixed 1000-point milestones and fights last nine to eleven seconds', () => {
+test('bosses arrive at fixed 1000-point milestones and fight lengths are randomized around eleven to fifteen seconds', () => {
   const a=setup();a.game.invincible=100;
   for(let level=1;level<=5;level++) {
-    a.game.distance=(level*1000-a.game.bonus)*10;
+    a.game.bossRest=0;a.game.distance=(level*1000-a.game.bonus)*10;
     a.update(.0001);
     assert.equal(a.game.boss.level,level);assert.equal(a.game.nextBoss,(level+1)*1000);
     assert.equal(a.game.mode,'running');
-    assert.ok(a.game.boss.duration>=9&&a.game.boss.duration<=11);
+    assert.ok(a.game.boss.duration>=10.7&&a.game.boss.duration<=15.3);
     const boss=a.game.boss;while(a.game.boss===boss&&a.game.mode==='running')a.update(1/120);
     assert.equal(a.game.boss,null);
     if(a.game.mode==='upgrade')a.chooseUpgrade('skip');
@@ -547,7 +547,7 @@ test('high bird balls hit standing dino but clear its dedicated crouch sprite', 
   assert.ok(a.DUCK_DINO.every(row=>row.length===24));
 });
 
-test('boulders bounce, falling hazards move, ledges crumble and shadow copies jumps', () => {
+test('boulders bounce, falling hazards move, ledges crumble and shadow reacts to jumps', () => {
   const a=setup();a.spawnBoss(5);a.launchAttack({type:'boulder'});
   const rock=a.game.obstacles[0],initialY=rock.y;a.advance(.15);assert.notEqual(rock.y,initialY);
   a.spawnBoss(4);a.launchAttack({type:'rain'});
@@ -556,8 +556,7 @@ test('boulders bounce, falling hazards move, ledges crumble and shadow copies ju
   a.dino.y=132;a.dino.vy=0;a.advance(.01);
   assert.ok(a.game.platforms[0].crumble>0);a.game.invincible=100;a.advance(.9);
   assert.equal(a.game.platforms.length,0);assert.ok(a.dino.y>132);
-  a.spawnBoss(5);a.dino.jumps=0;a.jump();assert.equal(a.game.boss.echoes.length,1);
-  a.advance(.82);assert.ok(a.game.warnings.some(w=>w.type==='echo'));
+  a.spawnBoss(5);a.dino.jumps=0;a.jump();assert.equal(a.game.boss.echoes.length,0);assert.match(a.game.boss.reaction,/SHADOW/);
 });
 
 test('inventory explains revives, shield fragments, fossil value and live timers',()=>{
@@ -570,25 +569,80 @@ test('inventory explains revives, shield fragments, fossil value and live timers
   assert.equal(a.elements.get('shield-timer').textContent,'3.3s · 1 hit');assert.equal(a.elements.get('slow-timer').textContent,'2.5s left');
 });
 
-test('dragon arena pulses are survivable using the stone and crouch without protection',()=>{
-  for(const width of [390,1000])for(const speed of [500,920])for(const seed of [1,42,12345,99999]) {
+test('dragon rift cages, high tides and ash seals are survivable without protection',()=>{
+  for(const width of [390,1000])for(const speed of [500,920])for(const slow of [false,true])for(const seed of [1,42,12345,99999]) {
     const a=setup(width,seed);a.spawnBoss(4);a.game.bossesDefeated=3;a.game.nextBoss=Infinity;
-    a.game.revivesUsed=2;a.game.invincible=0;a.game.distance=(speed-500)*32;a.game.speed=speed;
+    a.game.revivesUsed=2;a.game.invincible=0;if(slow)a.game.slow=30;a.game.distance=(speed-500)*32;a.game.speed=speed;
     const seen=new Set(),plans=[];let time=0,landed=false;
-    while(a.game.boss&&a.game.mode==='running'&&time<13){
+    while(a.game.boss&&a.game.mode==='running'&&time<28){
       for(const warning of a.game.warnings)if(!seen.has(warning)){
-        seen.add(warning);assert.equal(warning.type,'terrain');plans.push({kind:warning.kind,impact:time+warning.delay,jumped:false});
+        seen.add(warning);assert.equal(warning.type,'terrain');plans.push({kind:warning.kind,impact:time+warning.delay/(slow?.58:1),jumped:false,second:false});
       }
-      const duck=plans.some(p=>p.kind==='ash'&&time>=p.impact-.3&&time<=p.impact+.55);
+      const duck=plans.some(p=>p.kind==='ash'&&time>=p.impact-.3&&time<=p.impact+(slow?.9:.55));
       a.events[duck?'keydown':'keyup']({code:'ArrowDown',preventDefault(){}});
-      for(const p of plans)if(p.kind==='lava'&&!p.jumped&&time>=p.impact-.3){a.jump();p.jumped=true;}
+      for(const p of plans)if(p.kind!=='ash'){
+        if(!p.jumped&&time>=p.impact-(p.kind==='vault'?.65:.3)){a.jump();p.jumped=true;}
+        if(p.kind==='vault'&&!p.second&&time>=p.impact-.28){a.jump();p.second=true;}
+      }
       a.update(1/120);time+=1/120;
-      if(a.dino.grounded&&a.dino.y===161)landed=true;
-      assert.ok(a.game.obstacles.filter(o=>o.type==='terrain').length<=1,'arena pulses must not overlap');
+      if(a.dino.grounded&&a.dino.y<247)landed=true;
+      assert.ok(new Set(a.game.obstacles.filter(o=>o.type==='terrain').map(o=>o.wave)).size<=1,'different pressure waves must not overlap');
     }
     assert.equal(a.game.mode,'upgrade',`width ${width}, speed ${speed}, seed ${seed}`);
     assert.equal(a.game.boss,null);assert.ok(seen.size>=3);assert.ok(landed,'single jump reaches the safe stone');
     assert.equal(a.game.shield,0);assert.equal(a.game.phaseCooldown,0);
+  }
+});
+
+test('complete shadow mirror fights are survivable using jump, duck and double jump',()=>{
+  for(const width of [390,1000])for(const speed of [500,920])for(const seed of [1,42,77,12345,99999]){
+    const a=setup(width,seed);a.spawnBoss(5);a.game.bossesDefeated=4;a.game.nextBoss=Infinity;a.game.invincible=0;a.game.revivesUsed=2;
+    a.game.distance=(speed-500)*32;a.game.speed=speed;
+    const seen=new Set(),plans=new Map();let time=0;
+    while(a.game.boss&&a.game.mode==='running'&&time<17){
+      for(const w of a.game.warnings)if(!seen.has(w)){
+        seen.add(w);const key=a.game.boss.volley;
+        if(w.type==='laser')plans.set(key,{action:'double',impact:time+w.delay,first:false,second:false});
+        else{
+          const left=w.side==='left',velocity=left?(a.dino.x-20)/.45:(a.game.boss.x-a.dino.x)/.8;
+          const travel=left?(a.dino.x+6-35)/velocity:(a.game.boss.x+3-a.dino.x-36)/velocity;
+          const impact=time+w.delay+travel;
+          if(!plans.has(key))plans.set(key,{action:w.high?'duck':'jump',impact,end:impact+.3,first:false});
+          else {const p=plans.get(key);p.impact=Math.min(p.impact,impact);p.end=Math.max(p.end,impact+.3);}
+        }
+      }
+      const values=[...plans.values()],duck=values.some(p=>p.action==='duck'&&time>=p.impact-.2&&time<=p.end+.1);
+      a.events[duck?'keydown':'keyup']({code:'ArrowDown',preventDefault(){}});
+      for(const p of values){
+        if(p.action==='jump'&&!p.first&&time>=p.impact-.24){a.jump();p.first=true;}
+        if(p.action==='double'){
+          if(!p.first&&time>=p.impact-.65){a.jump();p.first=true;}
+          if(!p.second&&time>=p.impact-.28){a.jump();p.second=true;}
+        }
+      }
+      a.update(1/120);time+=1/120;
+    }
+    assert.equal(a.game.mode,'won',`${width}/${speed}/${seed}`);assert.equal(a.game.shield,0);assert.equal(a.game.phaseCooldown,0);
+  }
+});
+
+test('boss victories produce a lasting randomized particle burst and a short recovery window',()=>{
+  const a=setup();a.game.nextBoss=Infinity;a.spawnBoss(1);a.game.boss.age=a.game.boss.duration-.001;a.update(.002);
+  const particles=a.game.particles.filter(p=>p.maxLife);assert.ok(particles.length>=45);assert.ok(new Set(particles.map(p=>p.life)).size>30);
+  assert.ok(a.game.bossRest>2);a.advance(.7);assert.ok(a.game.particles.some(p=>p.maxLife&&p.life>.3));a.draw();
+});
+
+test('Rift Cage punishes a double jump and High Tide punishes staying on the ground',()=>{
+  for(const kind of ['cage','vault']){
+    const a=setup();a.spawnBoss(4);a.game.boss.shot=Infinity;a.game.boss.arenaBag=[kind];a.game.invincible=0;a.game.revivesUsed=2;
+    a.bossAttack(a.game.boss);const impact=a.game.warnings[0].delay;let first=false,second=false;
+    for(let t=0;t<impact+1&&a.game.mode==='running';t+=1/120){
+      if(kind==='cage'){
+        if(!first&&t>=impact-.65){a.jump();first=true;}
+        if(!second&&t>=impact-.28){a.jump();second=true;}
+      }a.update(1/120);
+    }
+    assert.equal(a.game.mode,'over',kind);
   }
 });
 
@@ -618,15 +672,15 @@ test('bosses keep attacking while prior volleys are still in flight', () => {
   a.game.obstacles.push({x:500,y:80,w:22,h:22,type:'ball',vx:1});
   a.game.boss.shot=0;a.update(.01);
   assert.ok(a.game.warnings.length>=3);
-  a.advance(.5);
-  assert.ok(a.game.obstacles.length>=4);
+  a.advance(.6);
+  assert.ok(a.game.obstacles.length>=3);
   const before=a.game.boss.volley;
   a.advance(1.3);
   assert.ok(a.game.boss.volley>before);
 });
 
-test('unchanged bird and shadow volleys still have reachable dodges', () => {
-  for(const width of [390,1000])for(const speed of [500,920])for(const level of [1,5])for(const high of [false,true]) {
+test('bird volleys still have reachable dodges', () => {
+  for(const width of [390,1000])for(const speed of [500,920])for(const level of [1])for(const high of [false,true]) {
     let solved=false;
     for(const lead of [.18,.22,.26,.30,.34,.38,.42,.46]) {
       const a=setup(width);a.spawnBoss(level);a.game.invincible=0;
@@ -647,6 +701,40 @@ test('unchanged bird and shadow volleys still have reachable dodges', () => {
     }
     assert.ok(solved,`Boss ${level}, ${high?'high':'low'} volley, viewport ${width}, speed ${speed}`);
   }
+});
+
+test('complete bird fights remain survivable with the randomized warning and shot spacing',()=>{
+  for(const width of [390,1000])for(const speed of [500,920])for(const seed of [1,42,77,12345,99999]){
+    const a=setup(width,seed);a.spawnBoss(1);a.game.nextBoss=Infinity;a.game.invincible=0;a.game.revivesUsed=2;
+    a.game.distance=(speed-500)*32;a.game.speed=speed;
+    const seen=new Set(),plans=new Map();let time=0;
+    while(a.game.boss&&a.game.mode==='running'&&time<13){
+      for(const w of a.game.warnings)if(!seen.has(w)){
+        seen.add(w);if(w.laneY!==undefined)continue;
+        const velocity=Math.min(a.game.speed*1.12,(a.game.boss.x-a.dino.x)/.8);
+        const impact=time+w.delay+(a.game.boss.x+3-a.dino.x-36)/velocity+(w.spacing||0),key=a.game.boss.volley;
+        if(!plans.has(key))plans.set(key,{high:w.high,impact,end:impact+.15,jumped:false});
+        else plans.get(key).end=Math.max(plans.get(key).end,impact+.15);
+      }
+      const values=[...plans.values()],duck=values.some(p=>p.high&&time>=p.impact-.2&&time<=p.end+.15);
+      a.events[duck?'keydown':'keyup']({code:'ArrowDown',preventDefault(){}});
+      for(const p of values)if(!p.high&&!p.jumped&&time>=p.impact-.25){a.jump();p.jumped=true;}
+      a.update(1/120);time+=1/120;
+    }
+    assert.equal(a.game.mode,'running',`${width}/${speed}/${seed}`);assert.equal(a.game.boss,null);
+  }
+});
+
+test('dragon attack order, warning delays, fight lengths and safe stones vary across seeds',()=>{
+  const orders=new Set(),stones=new Set(),durations=new Set();
+  for(let seed=1;seed<=35;seed++){
+    const a=setup(1000,seed);a.spawnBoss(4);durations.add(a.game.boss.duration);const order=[];
+    for(let i=0;i<9;i++){
+      a.game.warnings=[];a.bossAttack(a.game.boss);const w=a.game.warnings[0];order.push(w.kind);
+      if(w.kind!=='ash')stones.add([w.ledgeX,w.ledgeY,w.ledgeW,w.expires,w.delay].join(','));
+    }orders.add(order.join(','));
+  }
+  assert.ok(orders.size>25);assert.ok(stones.size>150);assert.equal(durations.size,35);
 });
 
 test('upgrade events occur only after defeating bosses 2 and 4', () => {
@@ -696,7 +784,7 @@ test('Boss Shield lasts through slow-motion encounters and ends with the fight',
   const a=setup();a.game.nextBoss=Infinity;a.game.perks.ward=1;a.game.slow=13;a.spawnBoss(5);
   a.game.boss.shot=Infinity;a.advance(10);
   assert.ok(a.game.boss);assert.ok(a.game.shield>0);
-  a.advance(10);assert.equal(a.game.boss,null);assert.equal(a.game.shield,0);
+  a.advance(12);assert.equal(a.game.boss,null);assert.equal(a.game.shield,0);
 });
 
 test('real game actions feed the achievement tracker, including pickups, bosses, and revival',()=>{
@@ -741,13 +829,13 @@ test('laser curtains require the advertised moves and each has a reachable safe 
     const a=setup(width,seed);a.spawnBoss(2);a.game.invincible=0;a.game.revivesUsed=2;a.game.boss.shot=Infinity;
     a.game.boss.laserBag=[action];a.bossAttack(a.game.boss);const warning=a.game.warnings[0];
     assert.equal(warning.action,action);
-    let first=false,second=false;
+    let first=false,second=false;const impact=warning.delay;
     for(let t=0;t<1.3&&a.game.mode==='running';t+=1/120) {
       if(action==='duck')a.events.keydown({code:'ArrowDown',preventDefault(){}});
-      if(action==='jump'&&!first&&t>=.60){a.jump();first=true;}
+      if(action==='jump'&&!first&&t>=impact-.35){a.jump();first=true;}
       if(action==='double') {
-        if(!first&&t>=.30){a.jump();first=true;}
-        if(!second&&t>=.67){a.jump();second=true;}
+        if(!first&&t>=impact-.65){a.jump();first=true;}
+        if(!second&&t>=impact-.28){a.jump();second=true;}
       }
       a.update(1/120);
     }
@@ -762,9 +850,10 @@ test('new quarry boss full fights are beatable using ordinary controls without s
     const a=setup(width,seed);a.spawnBoss(3);a.game.invincible=0;a.game.revivesUsed=2;
     a.game.distance=(initialSpeed-500)*32;a.game.speed=initialSpeed;a.game.nextBoss=Infinity;
     const seen=new Set(),plans=[];let elapsed=0;
-    while(a.game.boss&&a.game.mode==='running'&&elapsed<12) {
+    while(a.game.boss&&a.game.mode==='running'&&elapsed<16) {
       for(const warning of a.game.warnings)if(!seen.has(warning)) {
         seen.add(warning);assert.equal(warning.type,'siege-rock');
+        if(warning.spacing>0)continue;
         const velocity=Math.min(a.game.speed,(a.game.boss.x-a.dino.x)/1.05);
         const impact=elapsed+warning.delay+(a.game.boss.x-a.dino.x-20)/velocity;
         plans.push({action:warning.action,impact,first:false,second:false});

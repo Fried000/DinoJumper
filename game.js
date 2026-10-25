@@ -16,6 +16,8 @@
   });
   const W = window.innerWidth < 650 ? 600 : 1000, H = 360, GROUND = 292;
   canvas.width = W;
+  const celebrationCanvas=$('boss-confetti'),celebrationCtx=celebrationCanvas?.getContext('2d');
+  if(celebrationCanvas){celebrationCanvas.width=W;celebrationCanvas.height=H;}
   const GRAVITY = 1850, JUMP = -660;
   const BASE_SPEED = 500, MAX_SPEED = 920;
   const BIOME_POINTS=3000,BORDER_APPROACH=400;
@@ -71,11 +73,11 @@
     return variant===undefined?base:{...base,...discovery.mutations[variant],obstacles:mutationObstacles[variant],name:`${discovery.mutations[variant].name} · ${game.challenge?'SECRET GROTTO':base.name}`,mutation:variant};
   };
   const BOSSES = [
-    { name: 'BALL-SPITTING BIRD', duration: 9, interval: [.95,1.25], hint: 'MULTI-BALL VOLLEYS · LOW: JUMP / HIGH: DUCK' },
-    { name: 'PRISM TRICERATOPS', duration: 9.5, interval: [1.5,1.75], hint: 'LASER WARNING → DUCK / JUMP / DOUBLE JUMP · X TO PHASE' },
-    { name: 'QUARRY T. REX', duration: 10, interval: [1.65,1.9], hint: 'JUMP ROCKS → DUCK THEIR RETURN · TOWERS: DOUBLE JUMP' },
-    { name: 'VOLCANIC DRAGON', duration: 10.5, interval: [2.5,2.7], hint: 'LAVA: JUMP ON STONE · ASH CEILING: CROUCH ON GROUND' },
-    { name: 'SHADOW DINO', duration: 11, interval: [.8,1.05], hint: 'STACKED VOLLEYS · DELAYED ECHOES · FINAL RAGE' },
+    { name: 'BALL-SPITTING BIRD', duration: 11, interval: [.92,1.23], hint: 'RANDOM BALL TRAINS · LOW: JUMP / HIGH: DUCK' },
+    { name: 'PRISM TRICERATOPS', duration: 12, interval: [1.5,1.78], hint: 'SCANNER → LOCKED BEAM · READ THE FINAL LINE' },
+    { name: 'QUARRY T. REX', duration: 13, interval: [1.7,1.95], hint: 'TWIN ROCKS + MAGNET RECALL · JUMP THEN DUCK / TOWER: DOUBLE' },
+    { name: 'VOLCANIC DRAGON', duration: 14, interval: [2.85,3.15], hint: 'RIFT CAGE: SINGLE JUMP · HIGH TIDE: DOUBLE · ASH: DUCK' },
+    { name: 'SHADOW DINO', duration: 15, interval: [1.8,2.05], hint: 'MIRROR SHOTS FROM BOTH SIDES · JUMP / DUCK / DOUBLE CURTAINS' },
   ];
   const UPGRADES = [
     {id:'shell',name:'Longer Shield',max:4,describe:n=>`Shield pickups last ${10+(n-1)*2} → ${10+n*2} seconds. A shield still blocks one hit.`,summary:n=>`${10+n*2}s shields`},
@@ -189,7 +191,7 @@
       lastUpgradeBossCount:0,event:null,nextEvent:rand(5,8),routeId:0,visitedRoute:-1,lastPattern:'',
       borderAnnounced:-1,previousBiome:0,biomeFade:0,phaseCooldown:0,phaseTrail:0,
       mutations:{},nextTraveler:18,travelerWaiting:false,portalSource:null,challenge:null,nextTrail:6,trail:null,trailId:0,
-      terrain:[],nextTerrain:5,terrainWaiting:false,terrainRun:null });
+      terrain:[],nextTerrain:5,terrainWaiting:false,terrainRun:null,bossRest:0 });
     game.biomeOrder=discovery?[0,...shuffled(Array.from({length:BIOMES.length-1},(_,i)=>i+1))]:null;
     game.mutationBag=[];game.portalOffers=[];game.selectedPortal=0;game.voidFalling=false;
     Object.assign(dino, { y: GROUND - 45, vy: 0, jumps: 0, grounded: true, duck: false });
@@ -221,9 +223,7 @@
     discovery?.sound(dino.jumps===2);
     achievement.record('jump',{double:dino.jumps===2});
     dino.grounded = false;
-    if (game.boss?.level === 5) {
-      game.boss.echoes.push({ delay: game.boss.age > game.boss.duration/2 ? .45 : .8, y: dino.y });
-    }
+    if(game.boss?.level===5){game.boss.reaction='YOUR SHADOW REMEMBERS';game.boss.reactionTime=.65;}
     if (dino.jumps === 2) burst(dino.x + 20, dino.y + 40, 8);
   }
   function phaseDash() {
@@ -267,6 +267,7 @@
     saveJournal();
   }
   function offerRevive() {
+    if(game.challenge){game.challenge.failed=true;finishPortal();return;}
     if(game.revivesUsed>=2){endRun();return;}
     const remaining=2-game.revivesUsed;
     game.mode='revive';duckKey=false;jumpHeld=false;
@@ -330,6 +331,14 @@
     if (reducedMotion) return;
     for (let i=0;i<count;i++) game.particles.push({x,y,vx:rand(-90,90),vy:rand(-100,40),life:.45});
   }
+  function bossBurst(boss){
+    if(reducedMotion)return;
+    const count=Math.floor(rand(45,66));
+    for(let i=0;i<count;i++){
+      const life=rand(1.2,2.1),angle=rand(0,Math.PI*2),speed=rand(70,245);
+      game.particles.push({x:boss.x+rand(0,70),y:(boss.level===1?boss.y+25:GROUND-60)+rand(-25,25),vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed-100,life,maxLife:life,size:rand(2,5),color:['#95836a','#b6a88a','#777960','#c39760'][Math.floor(random()*4)]});
+    }
+  }
   function hurt(obstacle) {
     if (game.invincible > 0) return;
     if(game.boss){game.boss.reaction='A WORTHY RUNNER';game.boss.reactionTime=1;}
@@ -361,25 +370,26 @@
     // reaches the first ledge; the ground underneath always stays traversable.
     game.routeId++;
     if(discovery&&(game.routeId===1||random()<.65)){
-      const destination=nextMutation(),width=Math.round(rand(145,175)),stride=width-24,start=W+60;
+      const destination=nextMutation(),width=Math.round(rand(145,175)),stride=width-rand(20,30),start=W+rand(50,85),rise=rand(24,28),base=rand(38,43);
       for(let i=0;i<5;i++){
-        const y=GROUND-40-i*27;
-        game.platforms.push({x:start+i*stride,y,w:width,h:10,stairs:true,step:i,routeId:game.routeId,biome:game.biome,destination});
+        const y=GROUND-base-i*rise;
+        game.platforms.push({x:start+i*stride,y,w:rand(145,175),h:10,stairs:true,step:i,routeId:game.routeId,biome:game.biome,destination});
         if(i>0)game.pickups.push({x:start+i*stride+width*.35,y:y-29,w:19,h:19,type:'fossil'});
       }
       const top=game.platforms.at(-1);
-      game.pickups.push({x:top.x+width-55,y:top.y-38,w:30,h:38,type:'portal',destination});
+      game.pickups.push({x:top.x+top.w-55,y:top.y-38,w:30,h:38,type:'portal',destination});
       toast(`HIDDEN STAIRCASE ↑ · ${discovery.mutations[destination].name} · DOUBLE JUMP TO ENTER`);return;
     }
     const risky=random()<.5;
+    let routeX=W+rand(60,95);
     for (let i=0;i<4;i++) {
-      const x = W+80+i*(risky?195:220);
-      const y = GROUND-115-(i===1||i===2?(risky?30:15):0);
-      game.platforms.push({x,y,w:risky?155:190,h:8,routeId:game.routeId,biome:game.biome});
+      const x=routeX,width=risky?rand(150,170):rand(180,205);
+      const y = GROUND-rand(108,118)-(i===1||i===2?rand(12,risky?30:20):0);
+      game.platforms.push({x,y,w:width,h:8,routeId:game.routeId,biome:game.biome});routeX+=width+rand(25,40);
       game.pickups.push({x:x+55,y:y-34,w:19,h:19,type:i===3?'fragment':'fossil'});
       if(risky && i===2)game.obstacles.push({x:x+100,y:y-28,w:32,h:28,type:'bird',hit:false,biome:game.biome});
     }
-    if(discovery&&random()<.4)game.pickups.push({x:W+180+3*(risky?195:220),y:GROUND-153,w:30,h:38,type:'portal'});
+    if(discovery&&random()<.4){const top=game.platforms.at(-1);game.pickups.push({x:top.x+top.w-50,y:top.y-38,w:30,h:38,type:'portal'});}
     toast(`${risky?'DARING':'SCENIC'} HIGH ROAD · FOSSILS + EGG FRAGMENT · GROUND IS OPTIONAL`);
   }
   function nextMutation(){
@@ -434,13 +444,18 @@
     const challenge=game.challenge;if(!challenge)return;
     const success=!challenge.failed&&challenge.age>=12,saved=challenge.saved;
     Object.assign(dino,saved.dino);delete saved.dino;Object.assign(game,saved);game.challenge=null;
+    if(!success){
+      achievement.record('hit',{shield:false,ward:false});endRun();
+      $('overlay-kicker').textContent='LOST BEYOND THE HIDDEN DOOR';$('overlay-text').textContent=`The trial claimed this run at ${score()} points. Hidden-door deaths bypass eggs and shields.`;
+      announce('You died in the secret trial. Run over.');return;
+    }
     game.invincible=Math.max(game.invincible,1);game.nextObstacle=Math.max(game.nextObstacle,1);
     if(success){
       game.bonus+=challenge.prize+challenge.collected*10;game.shield=Math.max(game.shield,10+game.perks.shell*2);
       const piece=discovery.uncover();
       discover('secrets','PORTAL CHALLENGE · COMPLETED');
       toast(`TRIAL COMPLETE · +${challenge.prize+challenge.collected*10} · SHIELD${piece?' · '+piece:' · MUSEUM COMPLETE'}`);
-    }else toast('TRIAL FAILED · BACK TO YOUR RUN · NO EGGS LOST');
+    }
     synchronizeBiome();saveJournal();
   }
   function terrainKind(theme=activeTheme()){
@@ -551,7 +566,7 @@
   }
   function spawnBoss(level = Math.min(5,game.bossesDefeated+1)) {
     const spec = BOSSES[level-1];
-    game.boss = { ...spec, level, age: 0, shot: .8, x: W-145, y: 68, w: 88, h: 60, echoes: [], feints: 0, volley: 0, lastPattern:'',lastHigh:null,laneStreak:0,laserBag:[] };
+    game.boss = { ...spec,duration:rand(spec.duration-.3,spec.duration+.3),level,age:0,shot:rand(.75,1),x:W-145,y:68,w:88,h:60,echoes:[],feints:0,volley:0,lastPattern:'',lastHigh:null,laneStreak:0,laserBag:[] };
     // Clear the runway so boss projectiles do not create unfair combinations.
     game.obstacles = [];
     game.terrain=[];game.terrainWaiting=false;game.nextTerrain=4;game.terrainRun=null;
@@ -578,14 +593,24 @@
     }
     if(type==='siege-rock') {
       const height=warning.height;
-      game.obstacles.push({x:boss.x,y:warning.laneY??GROUND-height,w:warning.width||34,h:height,
+      const speed=Math.min(game.speed,(boss.x-dino.x)/1.05);
+      game.obstacles.push({x:boss.x+(warning.spacing||0)*speed,y:warning.laneY??GROUND-height,w:warning.width||34,h:height,
         vx:Math.min(game.speed,(boss.x-dino.x)/1.05),recall:warning.recall,stage:'out',type:'siege-rock',hit:false,age:0,biome:game.biome});return;
     }
     if(type==='terrain') {
-      const lava=warning.kind==='lava';
-      game.obstacles.push({x:0,y:lava?GROUND-26:0,w:W,h:lava?H-GROUND+26:GROUND-26,type:'terrain',kind:warning.kind,ttl:lava?.85:.45,age:0,hit:false,biome:game.biome});
-      if(lava)game.platforms.push({x:dino.x-26,y:GROUND-86,w:140,h:8,fixed:true,expires:1.25});
+      const ash=warning.kind==='ash',y=warning.ledgeY??GROUND-86;
+      const slab=(top,height,kind,ttl)=>game.obstacles.push({x:0,y:top,w:W,h:height,type:'terrain',kind,ttl,age:0,hit:false,biome:game.biome,wave:boss.volley});
+      if(ash)slab(0,GROUND-26,'ash',.45);
+      else{
+        slab(y+12,H-y-12,'rift-floor',warning.kind==='vault'?.85:.95);
+        if(warning.kind==='cage')slab(0,y-100,'rift-ceiling',.95);
+        game.platforms.push({x:warning.ledgeX??dino.x-26,y,w:warning.ledgeW??140,h:8,fixed:true,expires:warning.expires??1.5,crumble:null,crumbleLife:warning.crumbleLife??1.1});
+      }
       return;
+    }
+    if(type==='mirror'){
+      const left=warning.side==='left',speed=left?(dino.x-20)/.45:(boss.x-dino.x)/.8;
+      game.obstacles.push({x:left?20:boss.x,y:GROUND-(warning.high?53:22),w:18,h:22,type:'mirror',vx:left?-speed:speed,fromLeft:left,age:0,hit:false,biome:game.biome});return;
     }
     const size = type==='charge'?48:type==='boulder'?Math.round(rand(25,34)):22;
     const y = warning.laneY ?? GROUND-(high?53:size);
@@ -606,12 +631,7 @@
   }
   function bossAttack(boss) {
     boss.volley++;
-    // Alternate the required response, with random-length trains in each wave.
-    // A ceiling ball punishes careless double jumps without sealing the gap.
-    const high=boss.volley%2===0;
-    const train=(type,count,lane=false,options={})=>{
-      for(let i=0;i<count;i++)warnAttack(type,lane,0,{spacing:i*.14,...options});
-    };
+    // Randomized encounter bags preserve varied, readable escape actions.
     const ceiling=()=>warnAttack('ball',false,0,{laneY:GROUND-195});
     if(boss.level===1) {
       const patterns=[
@@ -626,32 +646,36 @@
       const pattern=choices[Math.floor(random()*choices.length)];
       boss.laneStreak=pattern.high===boss.lastHigh?boss.laneStreak+1:1;
       boss.lastHigh=pattern.high;boss.lastPattern=pattern.name;
-      for(let i=0;i<pattern.count;i++)warnAttack('ball',pattern.high,0,{spacing:i*pattern.gap});
+      const gap=pattern.gap*rand(.92,1.08),delay=rand(.45,.53);
+      for(let i=0;i<pattern.count;i++)warnAttack('ball',pattern.high,0,{spacing:i*gap,delay});
       if(pattern.sky)ceiling();
     } else if(boss.level===2) {
-      let action;
-      if(boss.volley%4===0)action='scatter';
-      else {
-        if(!boss.laserBag.length){boss.laserBag=['duck','jump','double'];for(let i=2;i>0;i--){const j=Math.floor(random()*(i+1));[boss.laserBag[i],boss.laserBag[j]]=[boss.laserBag[j],boss.laserBag[i]];}}
-        action=boss.laserBag.pop();
-      }
+      if(!boss.laserBag.length)boss.laserBag=shuffled(['duck','jump','double','scatter']);
+      const action=boss.laserBag.pop();
       const y=action==='duck'?rand(GROUND-39,GROUND-28):action==='jump'?rand(GROUND-80,GROUND-45):action==='double'?rand(GROUND-190,GROUND-145):rand(20,GROUND-16);
       const height=action==='jump'||action==='double'?GROUND-y:8;
-      game.warnings.push({type:'laser',action,laneY:y,height,delay:.95,label:action==='double'?'LASER CURTAIN · DOUBLE JUMP':action==='jump'?'LOW LASER CURTAIN · JUMP':action==='duck'?'HEAD-HEIGHT LASER · DUCK':'SCATTER LASER · READ THE LINE'});
+      game.warnings.push({type:'laser',action,laneY:y,height,delay:rand(.98,1.1),scanning:true,label:action==='double'?'LASER CURTAIN · DOUBLE JUMP':action==='jump'?'LOW LASER CURTAIN · JUMP':action==='duck'?'HEAD-HEIGHT LASER · DUCK':'SCATTER LASER · READ THE LINE'});
     } else if(boss.level===3) {
-      const choices=['ground','tower'].filter(p=>p!==boss.lastPattern);
+      const choices=['ground','tower','twins'].filter(p=>p!==boss.lastPattern);
       const pattern=choices[Math.floor(random()*choices.length)];boss.lastPattern=pattern;
-      const height=pattern==='tower'?rand(132,146):pattern==='high'?20:rand(35,52);
-      game.warnings.push({type:'siege-rock',action:pattern,height,laneY:pattern==='high'?rand(GROUND-52,GROUND-46):GROUND-height,width:pattern==='tower'?34:40,
-        recall:pattern==='ground',delay:.7,label:pattern==='tower'?'ROCK TOWER · DOUBLE JUMP':'MAGNET ROCK · JUMP, THEN DUCK RETURN'});
+      const height=pattern==='tower'?rand(132,146):pattern==='twins'?rand(30,36):rand(35,50);
+      const delay=rand(.7,.82),width=pattern==='tower'?rand(30,35):rand(30,39);
+      for(let i=0;i<(pattern==='twins'?2:1);i++)game.warnings.push({type:'siege-rock',action:pattern,height,laneY:GROUND-height,width,spacing:i*rand(.12,.16),recall:pattern!=='tower',delay,label:pattern==='tower'?'ROCK TOWER · DOUBLE JUMP':pattern==='twins'?'TWIN MAGNETS · JUMP BOTH, THEN DUCK RETURN':'MAGNET ROCK · JUMP, THEN DUCK RETURN'});
     } else if(boss.level===4) {
-      const kind=high?'ash':'lava';
-      game.warnings.push({type:'terrain',kind,delay:1.05,laneY:high?GROUND-26:GROUND-26,label:high?'ASH CEILING · LAND AND CROUCH':'FLOOR ERUPTION · JUMP ON THE STONE'});
+      if(!boss.arenaBag?.length)boss.arenaBag=shuffled(['cage','vault','ash']);
+      const kind=boss.arenaBag.pop(),ledgeY=GROUND-(kind==='vault'?rand(142,155):rand(77,91));
+      game.warnings.push({type:'terrain',kind,ledgeY,ledgeX:dino.x-rand(20,31),ledgeW:rand(110,145),expires:rand(1.5,1.65),crumbleLife:rand(1.05,1.18),delay:rand(1.02,1.15),label:kind==='ash'?'ASH SEAL · LAND AND CROUCH':kind==='vault'?'HIGH TIDE · DOUBLE JUMP TO THE HIGH STONE':'RIFT CAGE · SINGLE JUMP · WATCH THE CEILING'});
     } else {
-      if(high) {train('ball',3,true);ceiling();}
-      else {
-        train(boss.volley%4===1?'boulder':'fireball',3,false,{bounce:10});
-        warnAttack('ball',true); // Jump over the stacked front of the volley.
+      if(!boss.mirrorBag?.length)boss.mirrorBag=shuffled(['jump','duck','double']);
+      const action=boss.mirrorBag.pop();boss.lastHigh=action==='duck';
+      if(action==='double'){
+        const height=rand(145,175);game.warnings.push({type:'laser',action,laneY:GROUND-height,height,delay:rand(1,1.1),label:'MIRROR CURTAIN · DOUBLE JUMP'});
+      }
+      else{
+        const side=random()<.5?'left':'right',delay=rand(.7,.82);
+        const firstTravel=side==='left'?.45:.8,secondTravel=side==='left'?.8:.45;
+        game.warnings.push({type:'mirror',high:action==='duck',side,delay,label:`MIRROR ${side.toUpperCase()} · ${action.toUpperCase()}`});
+        game.warnings.push({type:'mirror',high:action==='duck',side:side==='left'?'right':'left',delay:delay+firstTravel-secondTravel+rand(.14,.19),label:`RETURNING MIRROR · ${action.toUpperCase()}`});
       }
     }
   }
@@ -715,6 +739,7 @@
     // Slow motion affects world movement, not the responsiveness of the jump.
     const worldDt = dt * (game.slow > 0 ? .58 : 1);
     game.time += dt;
+    game.bossRest=Math.max(0,(game.bossRest||0)-dt);
     game.distance += game.speed * worldDt;
     game.speed = Math.min(MAX_SPEED,BASE_SPEED+game.distance/32);
     for (const key of ['shield','slow','invincible','messageTimer','biomeSign']) game[key] = Math.max(0,game[key]-dt);
@@ -734,12 +759,12 @@
       if(!platform.fixed)platform.x -= dx;
       if(platform.expires!==undefined){platform.expires-=worldDt;if(platform.expires<=0)continue;}
       if(platform.crumble!==undefined && platform.crumble!==null) {
-        platform.crumble-=dt;if(platform.crumble<=0)continue;
+        platform.crumble-=platform.fixed?worldDt:dt;if(platform.crumble<=0)continue;
       }
       if (!game.voidFalling && dino.vy >= 0 && oldBottom <= platform.y+3 && dino.y+dino.h >= platform.y &&
         dino.x+dino.w-8 > platform.x && dino.x+8 < platform.x+platform.w) {
         dino.y = platform.y-dino.h; dino.vy = 0; dino.grounded = true; dino.jumps = 0;
-        if(platform.crumble===null)platform.crumble=.85;
+        if(platform.crumble===null)platform.crumble=platform.crumbleLife||.85;
         if(platform.routeId!==undefined && game.visitedRoute!==platform.routeId) {
           game.visitedRoute=platform.routeId;discover('secrets','SECRET ROUTE · THE HIGH ROAD');
           achievement.record('route');
@@ -755,7 +780,7 @@
     if(checkTerrain())return;
     game.platforms = game.platforms.filter(p=>p.x+p.w>0 && (p.expires===undefined||p.expires>0) && (p.crumble===undefined||p.crumble===null||p.crumble>0));
 
-    if (!game.boss && !game.completed && score() >= game.nextBoss && !game.terrain.length && !game.obstacles.some(o=>!o.hit&&o.x+o.w>0)) {
+    if (!game.boss && !(game.bossRest>0) && !game.completed && score() >= game.nextBoss && !game.terrain.length && !game.obstacles.some(o=>!o.hit&&o.x+o.w>0)) {
       game.nextBoss += 1000;
       spawnBoss();
     }
@@ -786,11 +811,12 @@
       game.warnings=game.warnings.filter(w=>w.delay>0);
       if (boss.age >= boss.duration) {
         const reward=boss.level*50;
+        bossBurst(boss);game.bossRest=2.5;
         achievement.record('bossWin',{level:boss.level,score:score()+reward});
         game.boss = null; game.bonus += reward;game.bossesDefeated++;
         if(game.wardActive){game.shield=0;game.wardActive=false;}
         discover('bosses',boss.name);
-        game.obstacles = []; game.warnings=[]; game.platforms=[];game.nextObstacle = rand(1.4,2);
+        game.obstacles = []; game.warnings=[]; game.platforms=[];game.nextObstacle = rand(2.2,2.8);
         game.nextRoute = Math.max(3, game.nextRoute);
         toast(`BOSS ${boss.level} OUTRUN · +${reward}`);
         if(game.bossesDefeated===5)winRun();
@@ -844,7 +870,7 @@
       if(obstacle.targetY!==undefined)obstacle.y=obstacle.startY+(obstacle.targetY-obstacle.startY)*Math.min(1,obstacle.age/.3);
       if(obstacle.bounce)obstacle.y=GROUND-obstacle.h-Math.abs(Math.sin(obstacle.age*obstacle.frequency))*obstacle.bounce;
       if(obstacle.vy)obstacle.y+=obstacle.vy*worldDt;
-      if(!obstacle.counted&&!obstacle.hit&&!obstacle.touched&&obstacle.x+obstacle.w<dino.x){
+      if(!obstacle.counted&&!obstacle.hit&&!obstacle.touched&&(obstacle.fromLeft?obstacle.x>dino.x+45:obstacle.x+obstacle.w<dino.x)){
         obstacle.counted=true;achievement.record('dodge');
         if(game.boss){game.boss.dodges=(game.boss.dodges||0)+1;if(game.boss.dodges%3===0){game.boss.reaction=['NICE FOOTWORK!','HOW DID YOU DODGE THAT?','GRR… TOO QUICK!'][Math.floor(random()*3)];game.boss.reactionTime=1.2;}}
       }
@@ -855,7 +881,7 @@
         if (game.mode !== 'running') return;
       }
     }
-    game.obstacles = game.obstacles.filter(o=>(o.recall||o.x+o.w>0) && (o.stage!=='return'||o.x<W) && o.y<H+50 && !o.hit && (o.ttl===undefined||o.ttl>0));
+    game.obstacles = game.obstacles.filter(o=>(o.recall||o.x+o.w>0) && (!o.fromLeft||o.x<W+50) && (o.stage!=='return'||o.x<W) && o.y<H+50 && !o.hit && (o.ttl===undefined||o.ttl>0));
     for (const pickup of game.pickups) {
       pickup.x -= dx;
       const radius=Math.min(140,game.perks.magnet*35);
@@ -1093,11 +1119,16 @@
     }ctx.restore();
   }
   function drawHazard(o,theme) {
+    if(o.type==='mirror'){
+      ctx.save();ctx.globalAlpha=.75;ctx.strokeRect(o.x,o.y,o.w,o.h);ctx.fillRect(o.x+5,o.y+5,8,12);
+      ctx.globalAlpha=.25;ctx.fillRect(o.x+(o.fromLeft?-16:o.w+3),o.y+5,13,12);ctx.restore();return;
+    }
     if(o.type==='terrain'){
-      ctx.save();ctx.fillStyle=o.kind==='lava'?'#b7663d':'#66616c';ctx.globalAlpha=.22;
+      const floor=o.kind==='lava'||o.kind==='rift-floor';
+      ctx.save();ctx.fillStyle=floor?'#b7663d':'#66616c';ctx.globalAlpha=.22;
       ctx.fillRect(o.x,o.y,o.w,o.h);ctx.globalAlpha=.8;
-      const edge=o.kind==='lava'?o.y:o.h;
-      for(let x=0;x<W;x+=24)ctx.fillRect(x,edge+(o.kind==='lava'?0:-6),16,6);
+      const edge=floor?o.y:o.h;
+      for(let x=0;x<W;x+=24)ctx.fillRect(x,edge+(floor?0:-6),16,6);
       ctx.restore();return;
     }
     if(o.type==='laser'){drawLaser(o,false);return;}
@@ -1217,11 +1248,18 @@
       ctx.fillStyle=theme.ink;ctx.fillRect(W-170,38,140*(1-boss.age/boss.duration),3);
       const warning=game.warnings[0];
       if(warning) {
-        if(warning.type==='laser')drawLaser(warning,true);
+        if(warning.type==='laser'){
+          if(warning.scanning&&warning.delay>.7)drawLaser({...warning,laneY:Math.max(12,Math.min(GROUND-15,warning.laneY+Math.sin(game.time*9)*22)),height:5},true);
+          else drawLaser(warning,true);
+        }
         if(warning.type==='terrain'){
-          ctx.save();ctx.fillStyle=warning.kind==='lava'?'#b7663d':'#66616c';ctx.globalAlpha=.08;
-          ctx.fillRect(0,warning.kind==='lava'?GROUND-26:0,W,warning.kind==='lava'?H-GROUND+26:GROUND-26);ctx.restore();
-          if(warning.kind==='lava'){ctx.strokeRect(dino.x-26,GROUND-86,140,8);ctx.font='9px Consolas,monospace';ctx.textAlign='left';ctx.fillText('SAFE STONE ↑',dino.x-24,GROUND-94);}
+          ctx.save();ctx.fillStyle=warning.kind==='ash'?'#66616c':'#b7663d';ctx.globalAlpha=.08;
+          if(warning.kind==='ash')ctx.fillRect(0,0,W,GROUND-26);
+          else{
+            ctx.fillRect(0,warning.ledgeY+12,W,H-warning.ledgeY-12);
+            if(warning.kind==='cage')ctx.fillRect(0,0,W,warning.ledgeY-100);
+          }ctx.restore();
+          if(warning.kind!=='ash'){ctx.strokeRect(warning.ledgeX,warning.ledgeY,warning.ledgeW,8);ctx.font='9px Consolas,monospace';ctx.textAlign='left';ctx.fillText(warning.kind==='vault'?'DOUBLE ↑ ↑':'SINGLE ↑',warning.ledgeX,warning.ledgeY-10);}
         }
         ctx.textAlign='center';ctx.font='bold 12px Consolas,monospace';
         ctx.fillText(`! ${warning.label} !`,W/2,145);
@@ -1243,7 +1281,11 @@
     if(!dino.grounded && dino.jumps===1) {ctx.fillStyle=theme.faint;ctx.fillRect(dino.x+17,dino.y-12,5,5);}
     if(game.slow>0) {ctx.fillStyle=theme.faint;ctx.fillRect(dino.x-20,dino.y+14,12,2);ctx.fillRect(dino.x-32,dino.y+22,16,2);}
     ctx.fillStyle=theme.ink;
-    for(const p of game.particles) {ctx.globalAlpha=Math.max(0,p.life/.45);ctx.fillRect(p.x,p.y,3,3);}ctx.globalAlpha=1;
+    if(celebrationCtx){celebrationCtx.clearRect(0,0,W,H);celebrationCanvas.style.top=canvas.offsetTop+'px';}
+    for(const p of game.particles){
+      const target=p.maxLife&&celebrationCtx?celebrationCtx:ctx;
+      target.globalAlpha=Math.min(1,Math.max(0,p.life/(p.maxLife||.45)));target.fillStyle=p.color||theme.ink;target.fillRect(p.x,p.y,p.size||3,p.size||3);
+    }ctx.globalAlpha=1;if(celebrationCtx)celebrationCtx.globalAlpha=1;
     if(game.messageTimer>0) {
       ctx.font='11px Consolas,monospace';ctx.textAlign='center';ctx.fillText(game.message,W/2, H-21);
     }
@@ -1317,6 +1359,10 @@
     if(game.mode==='running') {
       let remaining=dt;
       while(remaining>0 && game.mode==='running'){const step=Math.min(remaining,1/120);update(step);remaining-=step;}
+    }
+    else if(['won','upgrade'].includes(game.mode)){
+      for(const p of game.particles){if(!p.maxLife)continue;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=300*dt;p.life=Math.max(0,p.life-dt);}
+      game.particles=game.particles.filter(p=>p.life>0);
     }
     updateHUD();draw();requestAnimationFrame(frame);
   }
