@@ -52,7 +52,7 @@
     }
     if(event==='jump'){inc(state.stats,'jumps');run.jumps++;if(p.double){inc(state.stats,'doubleJumps');run.doubleJumps++;}}
     if(event==='biome') {
-      unique('biomes',p.name);if(p.index<48)unique('namedBiomes',p.name);else state.flags.frontier=1;
+      unique('biomes',p.name);if(p.index<55)unique('namedBiomes',p.worldName||p.name);else state.flags.frontier=1;
       if(run&&!run.biomes.includes(p.name)){run.biomes.push(p.name);best('biomes',run.biomes.length);}
     }
     if(event==='route'){inc(state.stats,'routes');run.routes++;best('routes',run.routes);if(run.routes>=3&&run.upperFossils>=10)state.flags.skyline=1;}

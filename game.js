@@ -4,6 +4,7 @@
   const ctx = canvas.getContext('2d');
   const $ = id => document.getElementById(id);
   const discovery=window.DinoDiscovery;
+  const trials=window.DinoTrials;
   const random=()=>discovery?.random?discovery.random():Math.random();
   const shuffled=values=>{const result=[...values];for(let i=result.length-1;i>0;i--){const j=Math.floor(random()*(i+1));[result[i],result[j]]=[result[j],result[i]];}return result;};
   const achievement=window.DinoAchievements||{record(){},subscribe(){}};
@@ -50,6 +51,10 @@
     ['SILVER BIRCHES','forest','stump,log,thorn',180], ['GEYSER BASIN','volcano','vents,basalt,lava-rock',55],
     ['COSMIC GARDEN','space','crystal,spore,meteor',285], ['LOST KINGDOM','ruins','pillar,ruin,urn',75],
     ['STARFALL FRONTIER','space','meteor,crystal,crater',255],
+    ['IRON RAILYARD','city','gear,barrier,crate',32],['TIDAL ARCHIPELAGO','coast','shell,coral,driftwood',185],
+    ['SCARLET BADLANDS','canyon','basalt,thorn,pillar',12],['HOLLOW ROOTS','forest','log,stump,thorn',110],
+    ['GLASS STEPPE','cave','crystal,ice,basalt',195],['HONEYCOMB HIGHLANDS','meadow','pillar,stump,thorn',48],
+    ['MIDNIGHT ORCHARD','fungus','spore,mushroom,log',275],
   ];
   BIOMES.push(...REGIONS.map(([name,scenery,types,hue])=>({name,scenery,obstacles:types.split(','),
     bg:`hsl(${hue} 35% 96%)`,ink:`hsl(${hue} 20% 31%)`,faint:`hsl(${hue} 25% 82%)`,
@@ -69,7 +74,7 @@
   const worldBiome=index=>getBiome(game.biomeOrder?.[index]??index);
   const activeTheme=()=>{
     const base=worldBiome(game.biome),variant=game.challenge?.variant??game.mutations?.[game.biome];
-    const mutationObstacles=[['meteor','crater','crystal'],['pillar','urn','ruin'],['log','thorn','stump'],['crystal','basalt','ice'],['meteor','crater','crystal'],['basalt','lava-rock','vents']];
+    const mutationObstacles=[['meteor','crater','crystal'],['pillar','urn','ruin'],['log','thorn','stump'],['crystal','basalt','ice'],['meteor','crater','crystal'],['basalt','lava-rock','vents'],['gear','barrier','crate'],['ruin','pillar','basalt'],['meteor','crystal','crater']];
     return variant===undefined?base:{...base,...discovery.mutations[variant],obstacles:mutationObstacles[variant],name:`${discovery.mutations[variant].name} · ${game.challenge?'SECRET GROTTO':base.name}`,mutation:variant};
   };
   const BOSSES = [
@@ -79,6 +84,8 @@
     { name: 'VOLCANIC DRAGON', duration: 14, interval: [2.85,3.15], hint: 'RIFT CAGE: SINGLE JUMP · HIGH TIDE: DOUBLE · ASH: DUCK' },
     { name: 'SHADOW DINO', duration: 15, interval: [1.8,2.05], hint: 'MIRROR SHOTS FROM BOTH SIDES · JUMP / DUCK / DOUBLE CURTAINS' },
   ];
+  const BOSS_MILESTONES=[1000,2000,3000,4000,5000,8000,12000,16000,20000,25000];
+  if(trials)BOSSES.push(...trials.bosses.map((boss,index)=>({...boss,level:index+6,interval:[1,1],hint:boss.concept})));
   const UPGRADES = [
     {id:'shell',name:'Longer Shield',max:4,describe:n=>`Shield pickups last ${10+(n-1)*2} → ${10+n*2} seconds. A shield still blocks one hit.`,summary:n=>`${10+n*2}s shields`},
     {id:'magnet',name:'Pickup Magnet',max:4,describe:n=>`Automatically pull in nearby fossils, fragments, and power-ups. Reach: ${(n-1)*35} → ${n*35} pixels.`,summary:n=>`${n*35}px reach`},
@@ -149,7 +156,9 @@
   let jumpHeld = false;
   let reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const rand = (a, b) => a + random() * (b - a);
-  const score = () => Math.floor(game.distance / 10) + game.bonus;
+  const score = () => Math.floor(game.distance/10+game.bonus+(game.challenge?.earned||0));
+  const activeStage=()=>game.challenge?.engine||game.boss?.engine||game.mutationStage;
+  const multiplier=()=>activeTheme().mutation===undefined?1:2;
   const pad = n => String(Math.floor(n)).padStart(5, '0');
   const intersects = (a,b) => a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
 
@@ -165,7 +174,7 @@
   }
   function renderJournal() {
     if(!$('journal-count'))return;
-    $('journal-count').textContent=`${journal.biomes.length} WORLDS · ${journal.bosses.length}/5 BOSSES`;
+    $('journal-count').textContent=`${journal.biomes.length} WORLDS · ${journal.bosses.length}/${BOSSES.length} BOSSES`;
     $('journal-biomes').textContent=journal.biomes.slice(-12).join('\n')||'Your first horizon is waiting.';
     $('journal-bosses').textContent=journal.bosses.join('\n')||'No bosses defeated yet.';
     $('journal-secrets').textContent=journal.secrets.join('\n')||'Take a detour. Find something new.';
@@ -191,13 +200,13 @@
       lastUpgradeBossCount:0,event:null,nextEvent:rand(5,8),routeId:0,visitedRoute:-1,lastPattern:'',
       borderAnnounced:-1,previousBiome:0,biomeFade:0,phaseCooldown:0,phaseTrail:0,
       mutations:{},nextTraveler:18,travelerWaiting:false,portalSource:null,challenge:null,nextTrail:6,trail:null,trailId:0,
-      terrain:[],nextTerrain:5,terrainWaiting:false,terrainRun:null,bossRest:0 });
+      terrain:[],nextTerrain:5,terrainWaiting:false,terrainRun:null,bossRest:0,mutationStage:null,mutationSpeed:0 });
     game.biomeOrder=discovery?[0,...shuffled(Array.from({length:BIOMES.length-1},(_,i)=>i+1))]:null;
     game.mutationBag=[];game.portalOffers=[];game.selectedPortal=0;game.voidFalling=false;
     Object.assign(dino, { y: GROUND - 45, vy: 0, jumps: 0, grounded: true, duck: false });
     duckKey = false;
     jumpHeld=false;
-    achievement.record('start');achievement.record('biome',{index:0,name:activeTheme().name});
+    achievement.record('start');achievement.record('biome',{index:0,name:activeTheme().name,worldName:worldBiome(0).name});
     journal.runs++;discover('biomes',activeTheme().name);saveJournal();
     $('upgrade-choices').hidden=true;$('end-run').hidden=true;
     $('portal-offer').hidden=true;
@@ -216,6 +225,11 @@
     if(game.mode==='won'){continueExploring();return;}
     if (game.mode === 'ready' || game.mode === 'over') { reset(); return; }
     if (game.mode === 'paused') { togglePause(); return; }
+    if(activeStage()){
+      const stage=activeStage(),before=stage.player.jumps;stage.jump();
+      if(stage.mode==='ufo'||stage.player.jumps>before)achievement.record('jump',{double:stage.player.jumps===2});
+      discovery?.sound();return;
+    }
     if (dino.jumps >= 2) return;
     dino.duck = false;
     dino.vy = dino.jumps === 0 ? JUMP : -610;
@@ -227,7 +241,7 @@
     if (dino.jumps === 2) burst(dino.x + 20, dino.y + 40, 8);
   }
   function phaseDash() {
-    if(game.mode!=='running'||game.challenge||game.phaseCooldown>0)return false;
+    if(game.mode!=='running'||activeStage()||game.phaseCooldown>0)return false;
     game.phaseCooldown=5;game.phaseTrail=.34;
     game.invincible=Math.max(game.invincible,.34);
     burst(dino.x+18,dino.y+24,9);announce('Phase dash. Ready again in five seconds.');return true;
@@ -236,10 +250,12 @@
   function synchronizeBiome(){
     const biome=Math.floor(score()/BIOME_POINTS);
     if(biome!==game.biome){
+      if(game.mutationStage&&!game.mutationStage.canExit())return;
+      game.mutationStage=null;game.mutationSpeed=game.speed;
       game.previousBiome=game.biome;game.biome=biome;game.biomeFade=1;game.biomeSign=3.5;
       if(discovery&&game.mutations[biome]===undefined&&random()<.45)game.mutations[biome]=nextMutation();
       game.nextObstacle=Math.max(game.nextObstacle,1);game.nextRoute=Math.max(game.nextRoute,3.8);game.nextEvent=Math.max(game.nextEvent,4);
-      achievement.record('biome',{index:biome,name:activeTheme().name});discover('biomes',activeTheme().name);toast(`NEW BIOME · ${activeTheme().name}`);
+      achievement.record('biome',{index:biome,name:activeTheme().name,worldName:worldBiome(biome).name});discover('biomes',activeTheme().name);toast(`NEW BIOME · ${activeTheme().name}`);
     }
     if(borderDistance()<=BORDER_APPROACH&&game.borderAnnounced!==game.biome){
       game.borderAnnounced=game.biome;toast(`BORDER AHEAD · ${worldBiome(game.biome+1).name} · CLEAR STRETCH`);
@@ -286,6 +302,8 @@
     game.invincible=2+game.perks.recovery;
     game.nextObstacle=1.3;
     if(game.boss){game.boss.shot=1.4;game.boss.echoes=[];}
+    if(game.boss?.engine){const b=game.boss;game.boss.engine=trials.create({variant:b.variant,rank:b.level-5,speed:b.engine.speed,width:W,height:H,random});}
+    game.mutationStage=null;
     Object.assign(dino,{y:GROUND-45,vy:0,jumps:0,grounded:true,duck:false});
     game.mode='running';$('overlay').hidden=true;$('end-run').hidden=true;
     last=null;duckKey=false;jumpHeld=false;
@@ -393,7 +411,7 @@
     toast(`${risky?'DARING':'SCENIC'} HIGH ROAD · FOSSILS + EGG FRAGMENT · GROUND IS OPTIONAL`);
   }
   function nextMutation(){
-    if(!game.mutationBag?.length)game.mutationBag=shuffled([0,1,2,3,4,5]);
+    if(!game.mutationBag?.length)game.mutationBag=shuffled(discovery.mutations.map((_,i)=>i));
     return game.mutationBag.pop();
   }
   function selectPortal(index){
@@ -416,9 +434,10 @@
     game.mode='portal-offer';game.portalSource=source;game.travelerWaiting=false;game.nextTraveler=rand(35,50);
     duckKey=false;jumpHeld=false;
     $('portal-title').textContent=source==='hidden'?'You found a hidden gate.':'A traveler has an invitation.';
-    game.portalPrize=225+25*Math.floor(random()*5);
-    $('portal-prize').textContent=`REWARD: +${game.portalPrize} POINTS (+10 PER FOSSIL) · SHIELD · NEW MUSEUM PIECE`;
-    game.portalOffers=destination===undefined?shuffled([0,1,2,3,4,5]).slice(0,3):[destination,...shuffled([0,1,2,3,4,5].filter(i=>i!==destination)).slice(0,2)];
+    game.portalPrize=450+50*Math.floor(random()*5);
+    $('portal-prize').textContent=`2× POINTS · +${game.portalPrize} COMPLETION · +${(25+game.perks.fortune*10)*2} PER FOSSIL · SHIELD · MUSEUM PIECE`;
+    const destinations=discovery.mutations.map((_,i)=>i);
+    game.portalOffers=destination===undefined?shuffled(destinations).slice(0,3):[destination,...shuffled(destinations.filter(i=>i!==destination)).slice(0,2)];
     for(let i=0;i<3;i++){
       const variant=discovery.mutations[game.portalOffers[i]];
       $('portal-choice-'+i).textContent=`${variant.name} · ${variant.subtitle}`;
@@ -433,17 +452,19 @@
     const saved={};
     for(const key of ['obstacles','pickups','platforms','particles','event','trail','routeActive','message','messageTimer','biomeSign','phaseCooldown','phaseTrail','terrain','nextTerrain','terrainWaiting','terrainRun','voidFalling'])saved[key]=game[key];
     saved.dino={...dino};
-    game.challenge={age:0,collected:0,spawned:0,variant:game.selectedPortal,saved,chapter:0,lastKind:'',prize:game.portalPrize};
+    const entrySpeed=game.speed*(game.slow>0?.58:1),duration=rand(15,18);
+    game.challenge={age:0,duration,collected:0,spawned:0,variant:game.selectedPortal,saved,chapter:0,lastKind:'',prize:game.portalPrize,fossilValue:(25+game.perks.fortune*10)*2,earned:0,engine:trials?.create({variant:game.selectedPortal,speed:entrySpeed,width:W,height:H,random})};
     game.voidFalling=false;
     game.obstacles=[];game.pickups=[];game.platforms=[];game.particles=[];game.terrain=[];game.event=null;game.trail=null;game.routeActive=false;game.biomeSign=2.4;game.phaseTrail=0;game.nextTerrain=.25;
     Object.assign(dino,{y:GROUND-45,vy:0,jumps:0,grounded:true,duck:false});
     discover('secrets',`PORTAL · ${discovery.mutations[game.challenge.variant].name}`);
-    toast('SECRET TRIAL · SURVIVE 12s · FOSSILS ARE BONUS LOOT');return true;
+    toast(`SECRET TRIAL · ${Math.ceil(duration)}s · 2× POINTS · ENTRY SPEED ${Math.round(entrySpeed)}`);return true;
   }
   function finishPortal(){
     const challenge=game.challenge;if(!challenge)return;
-    const success=!challenge.failed&&challenge.age>=12,saved=challenge.saved;
+    const success=!challenge.failed&&challenge.age>=challenge.duration,saved=challenge.saved;
     Object.assign(dino,saved.dino);delete saved.dino;Object.assign(game,saved);game.challenge=null;
+    game.bonus+=Math.floor(challenge.earned||0);
     if(!success){
       achievement.record('hit',{shield:false,ward:false});endRun();
       $('overlay-kicker').textContent='LOST BEYOND THE HIDDEN DOOR';$('overlay-text').textContent=`The trial claimed this run at ${score()} points. Hidden-door deaths bypass eggs and shields.`;
@@ -451,10 +472,12 @@
     }
     game.invincible=Math.max(game.invincible,1);game.nextObstacle=Math.max(game.nextObstacle,1);
     if(success){
-      game.bonus+=challenge.prize+challenge.collected*10;game.shield=Math.max(game.shield,10+game.perks.shell*2);
+      game.bonus+=challenge.prize+challenge.collected*challenge.fossilValue;game.shield=Math.max(game.shield,10+game.perks.shell*2);
+      game.runFossils+=challenge.collected;journal.fossils+=challenge.collected;
+      for(let i=0;i<challenge.collected;i++)achievement.record('pickup',{type:'fossil',points:challenge.fossilValue,score:score()});
       const piece=discovery.uncover();
       discover('secrets','PORTAL CHALLENGE · COMPLETED');
-      toast(`TRIAL COMPLETE · +${challenge.prize+challenge.collected*10} · SHIELD${piece?' · '+piece:' · MUSEUM COMPLETE'}`);
+      toast(`TRIAL COMPLETE · +${challenge.prize+challenge.collected*challenge.fossilValue} · SHIELD${piece?' · '+piece:' · MUSEUM COMPLETE'}`);
     }
     synchronizeBiome();saveJournal();
   }
@@ -508,7 +531,7 @@
     }
     game.terrain=game.terrain.filter(t=>t.x+t.w>0);
     if(!game.terrain.length&&game.terrainRun){
-      if(game.terrainRun.clean&&!game.challenge){game.bonus+=game.terrainRun.reward;toast(`CLEAN PASSAGE · +${game.terrainRun.reward}`);}
+      if(game.terrainRun.clean&&!game.challenge){game.bonus+=game.terrainRun.reward*multiplier();toast(`CLEAN PASSAGE · +${game.terrainRun.reward}`);}
       game.terrainRun=null;
     }
   }
@@ -538,35 +561,16 @@
     return false;
   }
   function updateChallenge(dt){
-    const c=game.challenge;c.age+=dt;game.time+=dt;
-    game.messageTimer=Math.max(0,game.messageTimer-dt);game.biomeSign=Math.max(0,game.biomeSign-dt);
-    game.nextTerrain-=dt;
-    if(game.nextTerrain<=0&&!game.terrain.length&&c.age<9){
-      const base=terrainKind(),combinations={void:['crystal','meteor'],geyser:['crystal','void'],thorns:['geyser','void'],crystal:['void','geyser'],meteor:['void','crystal'],lava:['geyser','meteor']};
-      const pool=c.chapter===0?[base]:combinations[base].filter(kind=>kind!==c.lastKind);
-      const kind=pool[Math.floor(random()*pool.length)];c.lastKind=kind;c.chapter++;
-      spawnTerrain(kind,true,330);game.nextTerrain=rand(.55,.85);
-      toast(`${activeTheme().name.split(' · ')[0]} · CHAPTER ${c.chapter} · ${kind.toUpperCase()}`);
-    }
-    moveTerrain(dt,330);
-    // Freeze the main world's score, hazards, effects, and boss milestones.
-    while(c.spawned<12&&c.age>=.3+Math.floor(c.spawned/3)*1.8+(c.spawned%3)*.14){
-      const t=.18+(c.spawned%3)*.14;
-      game.pickups.push({x:W+40,y:GROUND-45+JUMP*t+.5*GRAVITY*t*t+20,w:23,h:23,type:'portal-token',vx:(W+40-dino.x)/1});c.spawned++;
-    }
-    const oldBottom=dino.y+45;
-    dino.vy+=GRAVITY*dt;dino.y+=dino.vy*dt;dino.grounded=false;
-    if(dino.y+45>=GROUND&&!game.voidFalling&&!gapUnderfoot()&&oldBottom<=GROUND+3){dino.y=GROUND-45;dino.vy=0;dino.grounded=true;dino.jumps=0;}
-    dino.duck=duckKey&&dino.grounded;
-    if(checkTerrain())return;
-    for(const p of game.pickups){p.x-=p.vx*dt;if(intersects(playerBox(),p))collectPickup(p);}
-    game.pickups=game.pickups.filter(p=>!p.collected&&p.x+p.w>0);
-    for(const p of game.particles)p.life-=dt;game.particles=game.particles.filter(p=>p.life>0);
-    if(c.age>=12)finishPortal();
+    const c=game.challenge;c.age+=dt;game.time+=dt;c.earned+=c.engine.speed*dt/10*2;
+    c.engine.step(dt,{held:jumpHeld,duck:duckKey});c.collected=c.engine.collected;syncStagePlayer(c.engine);
+    if(c.engine.dead){c.failed=true;finishPortal();return;}
+    if(c.age>=c.duration)finishPortal();
   }
-  function spawnBoss(level = Math.min(5,game.bossesDefeated+1)) {
+  function spawnBoss(level = Math.min(BOSSES.length,game.bossesDefeated+1)) {
     const spec = BOSSES[level-1];
     game.boss = { ...spec,duration:rand(spec.duration-.3,spec.duration+.3),level,age:0,shot:rand(.75,1),x:W-145,y:68,w:88,h:60,echoes:[],feints:0,volley:0,lastPattern:'',lastHigh:null,laneStreak:0,laserBag:[] };
+    game.mutationStage=null;
+    if(level>5){const rank=level-5;game.boss.engine=trials.create({variant:spec.variant,rank,speed:Math.max(game.speed+100+rank*40,700+rank*100),width:W,height:H,random});jumpHeld=false;}
     // Clear the runway so boss projectiles do not create unfair combinations.
     game.obstacles = [];
     game.terrain=[];game.terrainWaiting=false;game.nextTerrain=4;game.terrainRun=null;
@@ -696,7 +700,7 @@
     if(pickup.collected)return;
     if(pickup.type==='portal'){pickup.collected=true;offerPortal('hidden',pickup.destination);return;}
     if(pickup.type==='portal-token'){pickup.collected=true;game.challenge.collected++;burst(pickup.x,pickup.y,5);return;}
-    const points=25+(pickup.type==='fossil'?game.perks.fortune*10+(game.routeActive?game.perks.route*15:0):0);
+    const points=(25+(pickup.type==='fossil'?game.perks.fortune*10+(game.routeActive?game.perks.route*15:0):0))*multiplier();
     achievement.record('pickup',{type:pickup.type,points,score:score()+(['fossil','bonus'].includes(pickup.type)?points:0),upper:game.routeActive,fireflies:game.event?.kind==='fireflies'});
     pickup.collected=true;burst(pickup.x,pickup.y,8);
     if(pickup.type==='shield') {game.shield=Math.min(18,10+game.perks.shell*2);toast('SHIELD · ONE FREE HIT');}
@@ -710,13 +714,13 @@
         discover('secrets','EGG FRAGMENTS · REBUILT SHELL');toast(`${needed} FRAGMENTS · BONUS SHIELD`);
       }else toast(`EGG FRAGMENT ${game.fragments}/${needed} · ${needed} MAKE A SHIELD`);
     } else {
-      game.bonus+=25+(pickup.type==='fossil'?game.perks.fortune*10+(game.routeActive?game.perks.route*15:0):0);
+      game.bonus+=points;
       if(pickup.type==='fossil') {
         game.runFossils++;journal.fossils++;saveJournal();
         if(discovery&&random()<.08){const piece=discovery.uncover();if(piece)toast(`MUSEUM DISCOVERY · ${piece}`);}
         if(game.trail&&pickup.trailId===game.trail.id){
           game.trail.collected++;
-          if(game.trail.collected===game.trail.total){game.bonus+=100;toast('FOSSIL TRAIL COMPLETE · +100 BONUS');game.trail=null;}
+          if(game.trail.collected===game.trail.total){game.bonus+=100*multiplier();toast('FOSSIL TRAIL COMPLETE · +100 BONUS');game.trail=null;}
         }
       }
     }
@@ -726,22 +730,66 @@
     game.completed=true;game.nextBoss=Infinity;game.mode='won';
     high=Math.max(high,score());
     try {localStorage.setItem('dino-jumper-best',String(high));}catch{}
-    showOverlay('FIVE BOSSES. ONE VERY STUBBORN DINO.', 'You beat the gauntlet.',
+    showOverlay('TEN BOSSES. ONE VERY STUBBORN DINO.', '25,000-point frontier conquered.',
       `${score()} points. Keep exploring new biomes, or restart for another challenge.`, 'EXPLORE ON');
-    announce('Victory! All five bosses defeated. Continue into the endless frontier.');
-    discover('secrets','FIVE BOSSES · GAUNTLET COMPLETE');saveJournal();
+    announce('Victory! All ten bosses defeated. Continue into the endless frontier.');
+    discover('secrets','TEN BOSSES · GAUNTLET COMPLETE');saveJournal();
+  }
+  function completeBoss(boss){
+    const reward=boss.level*50*multiplier();bossBurst(boss);game.bossRest=2.5;
+    achievement.record('bossWin',{level:boss.level,score:score()+reward});
+    game.boss=null;game.bonus+=reward;game.bossesDefeated++;
+    if(game.wardActive){game.shield=0;game.wardActive=false;}
+    discover('bosses',boss.name);game.obstacles=[];game.warnings=[];game.platforms=[];game.nextObstacle=rand(2.2,2.8);game.nextRoute=Math.max(3,game.nextRoute);
+    toast(`BOSS ${boss.level} OUTRUN · +${reward}`);
+    if(game.bossesDefeated===BOSSES.length)winRun();
+    else if(game.bossesDefeated%2===0&&game.lastUpgradeBossCount<game.bossesDefeated)openUpgrade();
+  }
+  function syncStagePlayer(stage){Object.assign(dino,{y:stage.player.y,vy:stage.player.vy,grounded:stage.player.grounded,jumps:stage.player.jumps});}
+  function tickStageDeath(stage){
+    if(['void fall','lava lake'].includes(stage.reason)){offerRevive();return;}
+    hurt({});
+    if(game.mode==='running'){stage.dead=false;Object.assign(stage.player,{y:['ship','ufo','jetpack'].includes(stage.mode)?145:252,vy:0,falling:false});}
+  }
+  function updateMutationWorld(dt){
+    const stage=game.mutationStage;game.time+=dt;game.distance+=stage.speed*dt;game.bonus+=stage.speed*dt/10;
+    const value=(25+game.perks.fortune*10)*2,old=stage.collected;stage.step(dt,{held:jumpHeld,duck:duckKey});game.bonus+=(stage.collected-old)*value;
+    const collected=stage.collected-old;
+    if(collected){game.runFossils+=collected;journal.fossils+=collected;for(let i=0;i<collected;i++)achievement.record('pickup',{type:'fossil',points:value,score:score()});saveJournal();}
+    for(const key of ['invincible','shield','slow','messageTimer','bossRest'])game[key]=Math.max(0,(game[key]||0)-dt);
+    syncStagePlayer(stage);
+    if(stage.dead){tickStageDeath(stage);return;}
+    synchronizeBiome();
+    if(game.mutationStage&&!(game.bossRest>0)&&!game.completed&&score()>=game.nextBoss&&stage.canExit()){
+      game.nextBoss=BOSS_MILESTONES[game.bossesDefeated+1]??Infinity;spawnBoss();
+    }
+  }
+  function updateMechanicalBoss(dt){
+    const b=game.boss,factor=game.slow>0?.58:1,worldDt=dt*factor;game.time+=dt;
+    game.distance+=b.engine.speed*worldDt;game.bonus+=(multiplier()-1)*b.engine.speed*worldDt/10;
+    for(const key of ['shield','slow','invincible','messageTimer'])game[key]=Math.max(0,game[key]-dt);
+    if(game.wardActive&&game.shield>0)game.shield=Math.max(game.shield,b.duration-b.age+1);
+    b.age+=worldDt;b.engine.step(worldDt,{held:jumpHeld,duck:duckKey});syncStagePlayer(b.engine);
+    if(b.engine.dead){tickStageDeath(b.engine);return;}
+    synchronizeBiome();if(b.age>=b.duration)completeBoss(b);
   }
   function playerBox() {
     return {x:dino.x+6,y:dino.y+(dino.duck?25:10),w:dino.duck?44:30,h:dino.duck?19:34};
   }
   function update(dt) {
     if(game.challenge){updateChallenge(dt);return;}
+    if(game.boss?.engine){updateMechanicalBoss(dt);return;}
+    if(trials&&discovery&&!game.boss&&activeTheme().mutation!==undefined&&!game.terrain.length&&!game.obstacles.length&&!game.platforms.length){
+      if(!game.mutationStage){game.pickups=[];game.routeActive=false;game.mutationStage=trials.create({variant:activeTheme().mutation,speed:(game.mutationSpeed||game.speed)*(game.slow>0?.58:1),width:W,height:H,random});}
+      updateMutationWorld(dt);return;
+    }
     // Slow motion affects world movement, not the responsiveness of the jump.
     const worldDt = dt * (game.slow > 0 ? .58 : 1);
     game.time += dt;
     game.bossRest=Math.max(0,(game.bossRest||0)-dt);
     game.distance += game.speed * worldDt;
-    game.speed = Math.min(MAX_SPEED,BASE_SPEED+game.distance/32);
+    game.bonus+=(multiplier()-1)*game.speed*worldDt/10;
+    game.speed = activeTheme().mutation===undefined?Math.min(MAX_SPEED,BASE_SPEED+game.distance/32):(game.mutationSpeed||game.speed);
     for (const key of ['shield','slow','invincible','messageTimer','biomeSign']) game[key] = Math.max(0,game[key]-dt);
     if(game.wardActive&&game.boss&&game.shield>0)game.shield=Math.max(game.shield,game.boss.duration-game.boss.age+1);
     for(const key of ['biomeFade','phaseCooldown','phaseTrail'])game[key]=Math.max(0,game[key]-dt);
@@ -781,7 +829,7 @@
     game.platforms = game.platforms.filter(p=>p.x+p.w>0 && (p.expires===undefined||p.expires>0) && (p.crumble===undefined||p.crumble===null||p.crumble>0));
 
     if (!game.boss && !(game.bossRest>0) && !game.completed && score() >= game.nextBoss && !game.terrain.length && !game.obstacles.some(o=>!o.hit&&o.x+o.w>0)) {
-      game.nextBoss += 1000;
+      game.nextBoss=BOSS_MILESTONES[game.bossesDefeated+1]??Infinity;
       spawnBoss();
     }
     if (game.boss) {
@@ -810,29 +858,20 @@
       }
       game.warnings=game.warnings.filter(w=>w.delay>0);
       if (boss.age >= boss.duration) {
-        const reward=boss.level*50;
-        bossBurst(boss);game.bossRest=2.5;
-        achievement.record('bossWin',{level:boss.level,score:score()+reward});
-        game.boss = null; game.bonus += reward;game.bossesDefeated++;
-        if(game.wardActive){game.shield=0;game.wardActive=false;}
-        discover('bosses',boss.name);
-        game.obstacles = []; game.warnings=[]; game.platforms=[];game.nextObstacle = rand(2.2,2.8);
-        game.nextRoute = Math.max(3, game.nextRoute);
-        toast(`BOSS ${boss.level} OUTRUN · +${reward}`);
-        if(game.bossesDefeated===5)winRun();
-        else if(game.bossesDefeated%2===0&&game.lastUpgradeBossCount<game.bossesDefeated) {openUpgrade();return;}
+        completeBoss(boss);if(game.mode!=='running')return;
       }
     } else {
+      const mutationPending=Boolean(trials&&activeTheme().mutation!==undefined);
       const terrainBorderClear=borderDistance()>750;
-      if(!terrainBorderClear||bossApproach)game.terrainWaiting=false;
-      if(discovery&&terrainBorderClear&&!bossApproach&&!game.travelerWaiting){
+      if(!terrainBorderClear||bossApproach||mutationPending)game.terrainWaiting=false;
+      if(discovery&&!mutationPending&&terrainBorderClear&&!bossApproach&&!game.travelerWaiting){
         game.nextTerrain-=worldDt;
         if(game.nextTerrain<=0&&!game.event&&!game.trail&&!game.platforms.length)game.terrainWaiting=true;
         if(game.terrainWaiting&&!game.obstacles.length&&!game.terrain.length&&!game.platforms.length){
           spawnTerrain();game.terrainWaiting=false;game.nextTerrain=activeTheme().mutation===undefined?rand(9,13):rand(5,7);
         }
       }
-      const terrainBusy=game.terrainWaiting||game.terrain.length>0;
+      const terrainBusy=mutationPending||game.terrainWaiting||game.terrain.length>0;
       const stairsActive=game.platforms.some(p=>p.stairs);
       game.nextEvent-=worldDt;
       if(game.event) {game.event.left-=worldDt;if(game.event.left<=0){achievement.record('eventWin',{kind:game.event.kind});game.event=null;}}
@@ -904,12 +943,13 @@
     const theme = activeTheme();
     $('biome').textContent = `${String(game.biome+1).padStart(2,'0')} / ${theme.name}`;
     $('score').textContent = `HI ${pad(Math.max(high,score()))}   ${pad(score())}`;
-    $('status').textContent = {ready:'READY TO RUN',running:game.challenge?`SURVIVE · ${game.challenge.collected} FOSSILS · ${Math.max(0,Math.ceil(12-game.challenge.age))}s`:game.boss?`BOSS ${game.boss.level} / 5`:game.completed?'ENDLESS FRONTIER':'ON THE MOVE',paused:'TAKING A BREATHER',over:'UNTIL NEXT TIME',won:'GAUNTLET COMPLETE',revive:'AN EGG CAN BRING YOU BACK',upgrade:'CHOOSE A PERK','portal-offer':'AN OPTIONAL DETOUR'}[game.mode];
+    $('status').textContent = {ready:'READY TO RUN',running:game.challenge?`SURVIVE · ${game.challenge.collected} FOSSILS · ${Math.max(0,Math.ceil(game.challenge.duration-game.challenge.age))}s`:game.boss?`BOSS ${game.boss.level} / ${BOSSES.length}`:game.completed?'ENDLESS FRONTIER':'ON THE MOVE',paused:'TAKING A BREATHER',over:'UNTIL NEXT TIME',won:'GAUNTLET COMPLETE',revive:'AN EGG CAN BRING YOU BACK',upgrade:'CHOOSE A PERK','portal-offer':'AN OPTIONAL DETOUR'}[game.mode];
     const effects = [];
     if (game.shield>0) effects.push(`SHIELD ${Math.ceil(game.shield)}s`);
+    if(multiplier()===2)effects.push('2× MUTATION POINTS');
     if (game.slow>0) effects.push(`SLOW ${Math.ceil(game.slow)}s`);
     if(game.trail)effects.push(`TRAIL ${game.trail.collected}/${game.trail.total} · +100`);
-    if(game.challenge)effects.push(`SURVIVE · LOOT ${game.challenge.collected} · ${Math.max(0,Math.ceil(12-game.challenge.age))}s`);
+    if(game.challenge)effects.push(`SURVIVE · LOOT ${game.challenge.collected} · ${Math.max(0,Math.ceil(game.challenge.duration-game.challenge.age))}s`);
     const terrainWarning=game.terrain.find(t=>t.stage==='warning'&&t.x<W);
     if(terrainWarning)effects.push(`${terrainWarning.kind==='meteor'?'IMPACT':'ERUPTION'} IN ${terrainWarning.timer.toFixed(1)}s`);
     $('effect').textContent = effects.join(' / ') || (borderDistance()<=BORDER_APPROACH?`NEXT: ${getBiome(game.biome+1).name}`:game.event?.name||'');
@@ -918,15 +958,16 @@
     $('fragments').textContent=`${game.fragments} / ${game.perks.finder?2:3} pieces`;
     $('fragment-meter').max=game.perks.finder?2:3;$('fragment-meter').value=game.fragments;
     $('fossils').textContent=`${game.runFossils} collected`;
-    $('fossil-value').textContent=`+${25+game.perks.fortune*10+(game.routeActive?game.perks.route*15:0)} points each`;
+    $('fossil-value').textContent=`+${(25+game.perks.fortune*10+(game.routeActive?game.perks.route*15:0))*multiplier()} points each`;
     $('shield-timer').textContent=game.shield>0?`${game.wardActive?'Boss fight':game.shield.toFixed(1)+'s'} · 1 hit`:'No shield';
     $('slow-timer').textContent=game.slow>0?`${game.slow.toFixed(1)}s left`:'Not active';
-    $('next-boss').textContent=game.completed?'ALL BOSSES BEATEN':`NEXT BOSS ${game.nextBoss.toLocaleString('en-US')}`;
+    $('next-boss').textContent=game.completed?'ALL TEN BOSSES BEATEN':`NEXT BOSS ${game.nextBoss.toLocaleString('en-US')}`;
     const owned=UPGRADES.filter(p=>game.perks[p.id]).map(p=>`${p.name}${p.max>1?' Lv '+game.perks[p.id]:''}: ${p.summary(game.perks[p.id])}`).join('  •  ');
-    const label=owned||'None yet — choose an upgrade after bosses 2 and 4.';
+    const label=owned||'None yet — choose an upgrade after bosses 2, 4, 6, and 8.';
     if($('active-upgrades').textContent!==label)$('active-upgrades').textContent=label;
     const upgradeBar=document.querySelector('.equipped-upgrades');if(upgradeBar)upgradeBar.hidden=!owned;
-    if($('phase')){$('phase').textContent=game.phaseCooldown>0?`X · PHASE ${Math.ceil(game.phaseCooldown)}s`:'X · PHASE READY';$('phase').disabled=game.mode!=='running'||Boolean(game.challenge)||game.phaseCooldown>0;}
+    const stage=activeStage();$('boost').hidden=!stage||!['ship','jetpack'].includes(stage.mode);$('stage-info').textContent=stage?`${stage.mode.toUpperCase()} · ${Math.round(stage.speed)} PX/S · ${game.boss?'BOSS ARENA':'2× POINTS'}`:'';
+    if($('phase')){$('phase').textContent=game.phaseCooldown>0?`X · PHASE ${Math.ceil(game.phaseCooldown)}s`:'X · PHASE READY';$('phase').disabled=game.mode!=='running'||Boolean(activeStage())||game.phaseCooldown>0;}
     document.querySelector('.game-shell').style.setProperty('--game-bg',theme.bg);
   }
   function pixelDino(x,y,scale=2,duck=false,animate=true) {
@@ -1199,6 +1240,28 @@
   }
   function draw() {
     const theme=activeTheme();
+    const stage=activeStage();
+    if(stage){
+      stage.draw(ctx,theme,(...args)=>pixelDino(...args));
+      ctx.fillStyle=theme.ink;ctx.textAlign='right';ctx.font='bold 11px Consolas,monospace';
+      const b=game.boss;
+      ctx.fillText(b?`${b.level}/10 · ${b.name}`:`2× POINTS · ${Math.round(stage.speed)} PX/S`,W-18,47);
+      if(!b&&stage.age<1.1){ctx.font='bold 12px Consolas,monospace';ctx.fillText(theme.name,W-18,83,W-45);}
+      const fraction=b?1-b.age/b.duration:game.challenge?1-game.challenge.age/game.challenge.duration:1-(score()%BIOME_POINTS)/BIOME_POINTS;
+      ctx.fillStyle=theme.faint;ctx.fillRect(W-175,58,155,4);ctx.fillStyle=theme.ink;ctx.fillRect(W-175,58,155*Math.max(0,fraction),4);
+      if(b?.engine){
+        ctx.save();ctx.translate(W-78,95);ctx.strokeStyle=theme.ink;ctx.lineWidth=3;
+        const rank=b.level-5;
+        if(rank===1){ctx.rotate(game.time*.7);ctx.strokeRect(-19,-19,38,38);ctx.strokeRect(-12,-12,24,24);}
+        if(rank===2){ctx.fillRect(-25,-19,50,14);ctx.fillRect(-20,13,40,8);ctx.fillRect(-25,-5,7,25);ctx.fillRect(18,-5,7,25);}
+        if(rank===3){ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(-35,-20);ctx.lineTo(-25,18);ctx.lineTo(0,5);ctx.lineTo(25,18);ctx.lineTo(35,-20);ctx.closePath();ctx.stroke();}
+        if(rank===4){ctx.strokeRect(-27,-12,54,24);ctx.fillRect(-40,-6,12,12);ctx.fillRect(27,-3,19,6);}
+        if(rank===5){ctx.strokeRect(-24,-24,48,48);ctx.rotate(game.time*.5);ctx.strokeRect(-15,-15,30,30);}
+        ctx.restore();
+      }
+      if(celebrationCtx)celebrationCtx.clearRect(0,0,W,H);
+      return;
+    }
     if(game.biomeFade>0){
       const previous=worldBiome(game.previousBiome);ctx.fillStyle=previous.bg;ctx.fillRect(0,0,W,H);scenery(previous);
       ctx.save();ctx.globalAlpha=1-game.biomeFade;ctx.fillStyle=theme.bg;ctx.fillRect(0,0,W,H);scenery(theme);ctx.restore();
@@ -1242,7 +1305,7 @@
       if(boss.reactionTime>0){ctx.save();ctx.textAlign='right';ctx.font='10px Consolas,monospace';ctx.fillStyle=theme.ink;ctx.fillText(boss.reaction,W-24,85);ctx.restore();}
       if(boss.level===4){ctx.save();ctx.globalAlpha=Math.min(.8,boss.age/boss.duration);ctx.strokeStyle=theme.bg;for(let i=0;i<4;i++){ctx.beginPath();ctx.moveTo(boss.x+30+i*12,GROUND-65);ctx.lineTo(boss.x+24+i*12,GROUND-48);ctx.stroke();}ctx.restore();}
       ctx.font='10px Consolas,monospace';ctx.textAlign='right';
-      ctx.fillText(`${boss.level}/5 · ${boss.name}`,W-20,22);
+      ctx.fillText(`${boss.level}/${BOSSES.length} · ${boss.name}`,W-20,22);
       ctx.font='9px Consolas,monospace';ctx.fillText(boss.hint,W-20,54);
       ctx.fillStyle=theme.faint;ctx.fillRect(W-170,38,140,3);
       ctx.fillStyle=theme.ink;ctx.fillRect(W-170,38,140*(1-boss.age/boss.duration),3);
@@ -1398,7 +1461,10 @@
     if(['Space','ArrowUp','KeyW'].includes(e.code))jumpHeld=false;
     if(['ArrowDown','KeyS'].includes(e.code))duckKey=false;
   });
-  canvas.addEventListener('pointerdown',e=>{e.preventDefault();canvas.focus({preventScroll:true});jump();});
+  canvas.addEventListener('pointerdown',e=>{e.preventDefault();canvas.focus({preventScroll:true});jumpHeld=true;canvas.setPointerCapture?.(e.pointerId);jump();});
+  for(const event of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(event,()=>{jumpHeld=false;});
+  $('boost').addEventListener('pointerdown',e=>{e.preventDefault();jumpHeld=true;$('boost').setPointerCapture(e.pointerId);canvas.focus({preventScroll:true});});
+  for(const event of ['pointerup','pointercancel','lostpointercapture'])$('boost').addEventListener(event,()=>{jumpHeld=false;});
   $('duck').addEventListener('pointerdown',e=>{e.preventDefault();duckKey=true;$('duck').setPointerCapture(e.pointerId);});
   for(const event of ['pointerup','pointercancel','lostpointercapture'])$('duck').addEventListener(event,()=>{duckKey=false;});
   function autoPause(){jumpHeld=false;duckKey=false;if(game.mode==='running')togglePause();}

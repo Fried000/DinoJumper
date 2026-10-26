@@ -2,6 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const driveTrial=require('./trial-controls');
 
 // Exercise the actual game loop in a minimal DOM. The test hook is injected into
 // the VM copy only, so the game does not expose mutable state in the browser.
@@ -28,8 +29,9 @@ function setup(width = 1000, seed = 12345, storage = new Map(), withAchievements
   sandbox.Math=randomMath;
   const source = fs.readFileSync(require.resolve('../game.js'), 'utf8')
     .replace('  renderJournal();updateHUD();requestAnimationFrame(frame);',
-      '  globalThis.api = {game,dino,reset,jump,update,togglePause,spawnRoute,spawnBoss,playerBox,draw,score,frame,spawnObstacle,bossAttack,launchAttack,pixelDino,DUCK_DINO,BIOMES,BOSSES,UPGRADES,getBiome,continueExploring,journal,offerRevive,useRevive,chooseUpgrade,openUpgrade,startEvent,collectPickup,endRun,discover,updateHUD,phaseDash,synchronizeBiome,borderDistance,spawnFossilTrail,offerPortal,choosePortal,finishPortal,activeTheme,spawnTerrain,terrainKind,gapUnderfoot,nextMutation,selectPortal};');
+      '  globalThis.api = {game,dino,reset,jump,update,togglePause,spawnRoute,spawnBoss,playerBox,draw,score,frame,spawnObstacle,bossAttack,launchAttack,pixelDino,DUCK_DINO,BIOMES,BOSSES,UPGRADES,getBiome,continueExploring,journal,offerRevive,useRevive,chooseUpgrade,openUpgrade,startEvent,collectPickup,endRun,discover,updateHUD,phaseDash,synchronizeBiome,borderDistance,spawnFossilTrail,offerPortal,choosePortal,finishPortal,activeTheme,spawnTerrain,terrainKind,gapUnderfoot,nextMutation,selectPortal,activeStage,BOSS_MILESTONES};');
   vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(require.resolve('../trials.js'),'utf8'),sandbox);
   if(withDiscovery)vm.runInContext(fs.readFileSync(require.resolve('../discovery.js'),'utf8'),sandbox);
   if(withAchievements) {
     for(const file of ['achievements-data.js','achievement-engine.js'])vm.runInContext(fs.readFileSync(require.resolve('../'+file),'utf8'),sandbox);
@@ -103,7 +105,7 @@ test('every run starts in the plain desert and later biome orders are shuffled w
   for(let seed=1;seed<=60;seed++){
     const a=setup(1000,seed,new Map(),false,true);
     assert.equal(a.activeTheme().name,'DESERT');assert.equal(a.game.mutations[0],undefined);
-    assert.equal(a.game.biomeOrder[0],0);assert.equal(new Set(a.game.biomeOrder).size,48);orders.add(a.game.biomeOrder.join(','));
+    assert.equal(a.game.biomeOrder[0],0);assert.equal(new Set(a.game.biomeOrder).size,55);orders.add(a.game.biomeOrder.join(','));
   }
   assert.ok(orders.size>50);
 });
@@ -181,15 +183,68 @@ test('portal death ends the entire run despite unused eggs and shields',()=>{
   assert.equal(a.discovery.found.length,0);assert.equal(a.game.mode,'over');a.useRevive();assert.equal(a.game.mode,'over');
 });
 
-test('all six portal survival trials are beatable on desktop and mobile',()=>{
-  for(const width of [390,1000])for(const seed of [1,42,77,12345])for(let variant=0;variant<6;variant++){
-    const a=setup(width,seed,new Map(),false,true);a.game.distance=4000;a.game.shield=0;
-    a.offerPortal('traveler');a.choosePortal(true);a.game.challenge.variant=variant;
-    for(let time=0;time<12.1&&a.game.challenge;time+=1/120){terrainControls(a,330);a.update(1/120);}
-    assert.equal(a.game.challenge,null);assert.ok(a.game.bonus>=225,`viewport ${width}, variant ${variant}: ${a.game.message}`);
-    assert.equal(a.discovery.found.length,1);assert.ok(a.game.shield>=10);assert.equal(a.game.revivesUsed,0);assert.equal(a.game.distance,4000);
-    a.finishPortal();assert.equal(a.discovery.found.length,1,'rewards cannot be claimed twice');
+test('all nine portal modes have survivable control sequences at the preserved entry speed',()=>{
+  for(const width of [390,1000])for(const seed of [1,42,77])for(let variant=0;variant<9;variant++){
+    const a=setup(width,seed,new Map(),false,true);a.game.distance=4000;a.game.speed=720;a.game.shield=0;
+    a.offerPortal('traveler',variant);a.choosePortal(true);const stage=a.game.challenge.engine;
+    assert.equal(stage.speed,720);assert.equal(stage.variant,variant);
+    for(let time=0;time<19&&a.game.challenge;time+=1/120){
+      const input=driveTrial(stage,()=>a.jump());
+      a.events[input.held?'keydown':'keyup']({code:'Space',preventDefault(){}});
+      a.events[input.duck?'keydown':'keyup']({code:'ArrowDown',preventDefault(){}});a.update(1/120);
+    }
+    assert.equal(a.game.mode,'running',width+'/'+seed+'/'+variant+': '+stage.reason);
+    assert.equal(a.game.challenge,null);assert.ok(a.game.bonus>=450);assert.equal(a.discovery.found.length,1);
+    assert.equal(a.game.revivesUsed,0);assert.equal(a.game.distance,4000);
   }
+});
+
+test('mutations preserve entry speed, pay double distance points, and restore the main run on success',()=>{
+  const a=setup(1000,42,new Map(),false,true);a.game.speed=720;a.game.nextBoss=Infinity;
+  a.offerPortal('hidden',8);a.choosePortal(true);const stage=a.game.challenge.engine;
+  a.update(.2);assert.equal(stage.speed,720);assert.equal(a.game.speed,720);assert.equal(a.score(),28);
+  const b=setup(1000,42,new Map(),false,true);b.game.nextBoss=Infinity;b.game.speed=720;b.game.mutations[0]=0;
+  b.update(.2);assert.equal(b.game.mutationStage.speed,720);assert.equal(b.game.speed,720);assert.equal(b.score(),28);
+});
+
+test('55 regular regions and nine shuffled mutations cover 25,000 points without a repeated world',()=>{
+  const a=setup(1000,42,new Map(),false,true);assert.equal(a.BIOMES.length,55);assert.equal(a.discovery.mutations.length,9);
+  const names=Array.from({length:9},(_,i)=>a.getBiome(a.game.biomeOrder[i]).name);assert.equal(new Set(names).size,9);
+  a.game.mutationBag=[];assert.equal(new Set(Array.from({length:9},()=>a.nextMutation())).size,9);
+});
+
+test('the five additional campaign bosses have complete, collision-respecting winning inputs',()=>{
+  for(const width of [390,1000])for(const initialSpeed of [500,920])for(const seed of [1,42,77])for(let level=6;level<=10;level++){
+    const a=setup(width,seed);a.game.speed=initialSpeed;a.game.bossesDefeated=level-1;a.game.nextBoss=Infinity;
+    a.spawnBoss(level);a.game.invincible=0;a.game.revivesUsed=2;const stage=a.game.boss.engine;
+    assert.ok(stage.speed>initialSpeed);
+    for(let time=0;time<23&&a.game.boss&&a.game.mode==='running';time+=1/120){
+      const input=driveTrial(stage,()=>a.jump());a.events[input.held?'keydown':'keyup']({code:'Space',preventDefault(){}});
+      a.events[input.duck?'keydown':'keyup']({code:'ArrowDown',preventDefault(){}});a.update(1/120);
+    }
+    assert.equal(a.game.mode,level===10?'won':level%2===0?'upgrade':'running',`${width}/${initialSpeed}/${seed}/${level}: ${stage.reason}`);
+    assert.equal(a.game.boss,null);assert.equal(a.game.bossesDefeated,level);assert.equal(a.game.shield,0);assert.equal(a.game.phaseCooldown,0);
+  }
+});
+
+test('the late campaign starts at 8,000 and ends with the final boss at 25,000',()=>{
+  const a=setup();a.game.invincible=100;
+  for(let level=6;level<=10;level++){
+    a.game.boss=null;a.game.bossRest=0;a.game.mode='running';a.game.bossesDefeated=level-1;
+    a.game.bonus=0;a.game.distance=a.BOSS_MILESTONES[level-1]*10;a.game.nextBoss=a.BOSS_MILESTONES[level-1];
+    a.update(.0001);assert.equal(a.game.boss.level,level);assert.equal(a.game.nextBoss,a.BOSS_MILESTONES[level]??Infinity);
+    a.game.boss.age=a.game.boss.duration-.001;a.update(.002);
+    assert.equal(a.game.boss,null);
+  }
+  assert.equal(a.game.completed,true);assert.equal(a.game.mode,'won');assert.ok(a.score()>=25000);
+});
+
+test('holding the jump key in jetpack mode continuously changes height, and release stops thrust',()=>{
+  const a=setup(1000,42,new Map(),false,true);a.offerPortal('hidden',8);a.choosePortal(true);
+  a.events.keydown({code:'Space',preventDefault(){}});for(let t=0;t<.4;t+=1/120)a.update(1/120);
+  const stage=a.game.challenge.engine,fuel=stage.player.fuel;assert.ok(stage.player.y<90);
+  a.events.keyup({code:'Space',preventDefault(){}});for(let t=0;t<.3;t+=1/120)a.update(1/120);
+  assert.ok(stage.player.fuel>fuel);assert.ok(stage.player.vy>-40);
 });
 
 test('normal and mutated terrain sequences are traversable at both speeds, widths, and in slow motion',()=>{
@@ -415,10 +470,9 @@ test('all five bosses have distinct attacks, warnings, increasing duration and r
     const bonus=a.game.bonus;a.advance(boss.duration+.02);
     assert.equal(a.game.boss,null);assert.equal(a.game.bossesDefeated,level);
     assert.equal(a.game.bonus-bonus,level*50);
-    if(level<5)assert.equal(a.game.nextBoss,Infinity);
-    else {assert.equal(a.game.mode,'won');assert.equal(a.game.completed,true);a.continueExploring();assert.equal(a.game.nextBoss,Infinity);}
+    assert.equal(a.game.nextBoss,Infinity);assert.equal(a.game.completed,false);
   }
-  a.spawnBoss();assert.equal(a.game.boss.level,5);
+  a.spawnBoss();assert.equal(a.game.boss.level,6);
 });
 
 test('bird chooses six non-repeating multi-ball patterns with random cooldowns', () => {
@@ -471,14 +525,14 @@ test('bosses arrive at fixed 1000-point milestones and fight lengths are randomi
   for(let level=1;level<=5;level++) {
     a.game.bossRest=0;a.game.distance=(level*1000-a.game.bonus)*10;
     a.update(.0001);
-    assert.equal(a.game.boss.level,level);assert.equal(a.game.nextBoss,(level+1)*1000);
+    assert.equal(a.game.boss.level,level);assert.equal(a.game.nextBoss,a.BOSS_MILESTONES[level]);
     assert.equal(a.game.mode,'running');
     assert.ok(a.game.boss.duration>=10.7&&a.game.boss.duration<=15.3);
     const boss=a.game.boss;while(a.game.boss===boss&&a.game.mode==='running')a.update(1/120);
     assert.equal(a.game.boss,null);
     if(a.game.mode==='upgrade')a.chooseUpgrade('skip');
   }
-  assert.equal(a.game.mode,'won');assert.equal(a.journal.bosses.length,5);
+  assert.equal(a.game.mode,'running');assert.equal(a.journal.bosses.length,5);assert.equal(a.game.nextBoss,8000);
 });
 
 test('biomes do not offer upgrades; upgrade choices pause, apply once, and resume', () => {
@@ -622,7 +676,7 @@ test('complete shadow mirror fights are survivable using jump, duck and double j
       }
       a.update(1/120);time+=1/120;
     }
-    assert.equal(a.game.mode,'won',`${width}/${speed}/${seed}`);assert.equal(a.game.shield,0);assert.equal(a.game.phaseCooldown,0);
+    assert.equal(a.game.mode,'running',`${width}/${speed}/${seed}`);assert.equal(a.game.shield,0);assert.equal(a.game.phaseCooldown,0);
   }
 });
 
@@ -656,8 +710,8 @@ test('magnetic quarry rocks pause behind the player and return at crouch height'
   a.advance(3);assert.ok(!a.game.obstacles.includes(rock));
 });
 
-test('48 distinct named biomes continue into unique deterministic frontier regions', () => {
-  const a=setup();assert.equal(a.BIOMES.length,48);
+test('55 distinct named biomes continue into unique deterministic frontier regions', () => {
+  const a=setup();assert.equal(a.BIOMES.length,55);
   const names=new Set();
   for(let i=0;i<5000;i++) {
     const theme=a.getBiome(i);assert.ok(!names.has(theme.name));names.add(theme.name);
@@ -747,7 +801,7 @@ test('upgrade events occur only after defeating bosses 2 and 4', () => {
       const chosen=a.game.upgradeOffers[0];a.chooseUpgrade(chosen);
       assert.ok(a.game.perks[chosen]>0);assert.equal(a.game.mode,'running');
       a.update(.001);assert.equal(a.game.mode,'running');
-    } else assert.equal(a.game.mode,level===5?'won':'running');
+    } else assert.equal(a.game.mode,'running');
   }
 });
 

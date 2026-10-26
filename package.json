@@ -6,6 +6,6 @@
   "scripts": {
     "start": "node scripts/serve.js",
     "build": "node scripts/build.js",
-    "test": "node scripts/build.js && node --test tests/game.test.js tests/achievements.test.js"
+    "test": "node scripts/build.js && node --test tests/game.test.js tests/achievements.test.js tests/trials.test.js"
   }
 }

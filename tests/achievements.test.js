@@ -50,7 +50,7 @@ test('exploration, weather, fossil value, and build combinations track their rea
   const {api}=engine();api.record('start');
   for(const kind of ['blizzard','meteor','stampede','fireflies'])api.record('eventWin',{kind});assert.equal(api.state.stats.eventTypes,4);
   for(let i=0;i<10;i++)api.record('biome',{name:'BIOME '+i,index:i});assert.equal(api.state.best.biomes,10);
-  api.record('biome',{name:'FRONTIER 49',index:48});assert.ok(api.state.flags.frontier);
+  api.record('biome',{name:'FRONTIER 56',index:55});assert.ok(api.state.flags.frontier);
   for(let i=0;i<3;i++)api.record('route');for(let i=0;i<20;i++)api.record('pickup',{type:'fossil',points:55,upper:true,fireflies:true});
   assert.ok(api.state.flags.skyline);assert.ok(api.state.flags.noMagnetRun);assert.equal(api.state.best.fossilValue,55);assert.equal(api.state.stats.fireflyFossils,20);
   api.record('upgrade',{id:'route'});api.record('upgrade',{id:'route'});assert.ok(api.state.flags.doubleDown);
@@ -67,7 +67,7 @@ test('magnet runs cannot earn the no-magnet fossil challenge and resets isolate 
 
 test('all goals can be earned when their criteria are met; no graph dead ends',()=>{
   const {api,data}=engine();for(const item of data.items)for(const [location,target]of item.criteria){const [group,key]=location.split('.');api.state[group][key]=Math.max(api.state[group][key]||0,target);}
-  api.state.sets.biomes=Array.from({length:48},(_,i)=>String(i));api.state.sets.namedBiomes=[...api.state.sets.biomes];api.state.sets.events=['a','b','c','d'];api.state.sets.upgrades=['shell','magnet','fall','fortune','clock','recovery','ward','finder','route'];
+  api.state.sets.biomes=Array.from({length:55},(_,i)=>String(i));api.state.sets.namedBiomes=[...api.state.sets.biomes];api.state.sets.events=['a','b','c','d'];api.state.sets.upgrades=['shell','magnet','fall','fortune','clock','recovery','ward','finder','route'];
   api.evaluate();assert.equal(Object.keys(api.state.unlocked).length,48);
 });
 
