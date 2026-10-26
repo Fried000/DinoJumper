@@ -5,9 +5,16 @@
   const $ = id => document.getElementById(id);
   const discovery=window.DinoDiscovery;
   const trials=window.DinoTrials;
-  const random=()=>discovery?.random?discovery.random():Math.random();
+  let randomState=0;
+  const entropy=()=>discovery?.random?discovery.random():Math.random();
+  const random=()=>{
+    if(!randomState)return entropy();
+    randomState=(randomState+0x6D2B79F5)>>>0;let value=Math.imul(randomState^(randomState>>>15),1|randomState);
+    value^=value+Math.imul(value^(value>>>7),61|value);return ((value^(value>>>14))>>>0)/4294967296;
+  };
   const shuffled=values=>{const result=[...values];for(let i=result.length-1;i>0;i--){const j=Math.floor(random()*(i+1));[result[i],result[j]]=[result[j],result[i]];}return result;};
-  const achievement=window.DinoAchievements||{record(){},subscribe(){}};
+  const achievementSource=window.DinoAchievements||{record(){},subscribe(){}};
+  const achievement={record:(...args)=>{if(!game.assisted)achievementSource.record(...args);},subscribe:fn=>achievementSource.subscribe(fn)};
   let achievementNoticeTimer;
   achievement.subscribe(items=>{
     const notice=$('achievement-toast');if(!notice)return;
@@ -132,6 +139,8 @@
     '000001110000111000000000',
   ];
   let high = 0;
+  let preferredAssist='normal';
+  try{const stored=localStorage.getItem('dino-jumper-training-mode');if(['normal','noclip','practice'].includes(stored))preferredAssist=stored;}catch{}
   try { high = Number(localStorage.getItem('dino-jumper-best')) || 0; } catch {}
   const journal={biomes:[],bosses:[],secrets:[],runs:0,revives:0,fossils:0,best:0};
   try {
@@ -149,11 +158,12 @@
     lastUpgradeBossCount:0,event:null,nextEvent:15,routeId:0,visitedRoute:-1,lastPattern:'',
     borderAnnounced:-1,previousBiome:0,biomeFade:0,phaseCooldown:0,phaseTrail:0,
     mutations:{},nextTraveler:18,travelerWaiting:false,portalSource:null,challenge:null,nextTrail:6,trail:null,trailId:0,
-    terrain:[],nextTerrain:5,terrainWaiting:false,terrainRun:null };
+    terrain:[],nextTerrain:5,terrainWaiting:false,terrainRun:null,assistMode:preferredAssist,assisted:preferredAssist!=='normal',trainingDeaths:0,deathFlash:0,assistGrace:0 };
   const dino = { x: 105, y: GROUND - 45, w: 45, h: 45, vy: 0, jumps: 0, grounded: true, duck: false };
   let last = null;
   let duckKey = false;
   let jumpHeld = false;
+  let checkpoint=null,checkpointClock=0,practiceHit=null;
   let reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const rand = (a, b) => a + random() * (b - a);
   const score = () => Math.floor(game.distance/10+game.bonus+(game.challenge?.earned||0));
@@ -164,12 +174,84 @@
 
   function announce(text) { $('announcer').textContent = text; }
   function toast(text) { game.message = text; game.messageTimer = 2.8; announce(text); }
+  function cloneData(value,omitEngines=false){
+    return JSON.parse(JSON.stringify(value,(key,item)=>{
+      if(typeof item==='function'||(omitEngines&&(key==='engine'||key==='mutationStage')))return undefined;
+      return typeof item==='number'&&!Number.isFinite(item)?{$nonFinite:String(item)}:item;
+    }),(key,item)=>item&&typeof item==='object'&&item.$nonFinite?Number(item.$nonFinite):item);
+  }
+  function captureCheckpoint(force=false,manual=false){
+    if(game.assistMode!=='practice'||game.mode!=='running')return false;
+    const stage=activeStage();
+    const safe=stage?stage.checkpointSafe():(dino.grounded&&!game.voidFalling&&!game.warnings.length&&!game.obstacles.some(o=>o.x<dino.x+game.speed*.4&&o.x+o.w>dino.x-20));
+    if(!force&&!safe)return false;
+    const engines={challenge:game.challenge?.engine,boss:game.boss?.engine,mutation:game.mutationStage};
+    const data=cloneData(game,true);
+    checkpoint={data,dino:{...dino},randomState,manual,engines:Object.fromEntries(Object.entries(engines).filter(([,engine])=>engine).map(([key,engine])=>[key,{engine,state:engine.snapshot()}]))};
+    checkpointClock=0;if(manual)toast('PRACTICE CHECKPOINT SAVED');return true;
+  }
+  function registerTrainingDeath(source,reason='hazard'){
+    if(game.assistMode==='noclip'&&source?.assistTouched)return false;
+    if(game.assistMode==='noclip'&&source)source.assistTouched=true;
+    game.trainingDeaths++;game.deathFlash=.5;
+    announce(`${game.assistMode==='noclip'?'No clip':'Practice'} death ${game.trainingDeaths}: ${reason}.`);return true;
+  }
+  function practiceDeath(source,reason='hazard'){
+    if(game.mode!=='running')return;
+    registerTrainingDeath(source,reason);practiceHit=source;game.mode='practice-death';duckKey=false;jumpHeld=false;
+    showOverlay('PRACTICE · UNLIMITED CONTINUES','Try that section again.',`Death ${game.trainingDeaths}. Continue just past the trap, or retry your saved checkpoint with the same layout.`,'CONTINUE HERE');
+    $('practice-retry').hidden=!checkpoint;$('end-run').hidden=false;
+    $('overlay-help').textContent='SPACE / TAP: CONTINUE HERE · RETRY CHECKPOINT TO REPLAY';
+    updateHUD();
+  }
+  function resumePractice(retry=false){
+    if(game.mode!=='practice-death')return;
+    const deaths=game.trainingDeaths,mode=game.assistMode;
+    if(retry&&checkpoint){
+      Object.assign(game,cloneData(checkpoint.data));Object.assign(dino,checkpoint.dino);randomState=checkpoint.randomState;
+      for(const [key,saved]of Object.entries(checkpoint.engines)){
+        saved.engine.restore(saved.state);
+        if(key==='challenge')game.challenge.engine=saved.engine;
+        else if(key==='boss')game.boss.engine=saved.engine;
+        else game.mutationStage=saved.engine;
+      }
+      if(!checkpoint.engines.mutation)game.mutationStage=null;
+    }else{
+      const stage=activeStage();
+      if(stage){stage.recover();syncStagePlayer(stage);if(game.challenge)game.challenge.failed=false;}
+      else{if(practiceHit){if(practiceHit.kind==='gap')practiceHit.practiceBridge=true;else practiceHit.hit=true;}Object.assign(dino,{y:GROUND-45,vy:0,jumps:0,grounded:true,duck:false});game.voidFalling=false;}
+      checkpoint=null;
+    }
+    game.assistMode=mode;game.assisted=true;game.trainingDeaths=deaths;game.mode='running';game.assistGrace=retry?0:.7;game.invincible=retry?game.invincible:Math.max(.7,game.invincible);
+    game.deathFlash=0;practiceHit=null;duckKey=false;jumpHeld=false;last=null;
+    $('overlay').hidden=true;$('practice-retry').hidden=true;$('end-run').hidden=true;checkpointClock=0;
+    if(!retry)captureCheckpoint(true);updateHUD();
+  }
+  function setAssistMode(mode){
+    if(!['normal','noclip','practice'].includes(mode))return;
+    preferredAssist=mode;game.assistMode=mode;game.assisted=game.assisted||mode!=='normal';checkpoint=null;checkpointClock=0;
+    try{localStorage.setItem('dino-jumper-training-mode',mode);}catch{}
+    if(game.mode==='practice-death')resumePractice(false);
+    if(mode==='practice')captureCheckpoint(true);updateHUD();
+  }
+  function stageInput(){return {held:jumpHeld,duck:duckKey,noclip:game.assistMode==='noclip',grace:game.assistGrace>0};}
+  function stepStage(stage,dt){
+    const before=stage.collisions;stage.step(dt,stageInput());
+    for(let i=before;i<stage.collisions;i++)registerTrainingDeath(null,stage.reason);
+  }
+  function updateTraining(dt){
+    game.deathFlash=Math.max(0,game.deathFlash-dt);game.assistGrace=Math.max(0,game.assistGrace-dt);
+    checkpointClock+=dt;
+    if(game.assistMode==='practice'&&(!checkpoint||(!checkpoint.manual&&checkpointClock>=1.2)))captureCheckpoint();
+  }
   function saveJournal() {
+    if(game.assisted)return;
     journal.best=Math.max(journal.best,score(),high);
     try {localStorage.setItem('dino-jumper-journal',JSON.stringify(journal));}catch{}
     renderJournal();
   }
   function discover(category,name) {
+    if(game.assisted)return;
     if(!journal[category].includes(name)) {journal[category].push(name);saveJournal();}
   }
   function renderJournal() {
@@ -188,9 +270,12 @@
     $('overlay').hidden = false;
     $('upgrade-choices').hidden=true;
     $('end-run').hidden=true;
+    $('practice-retry').hidden=true;
     $('overlay-help').textContent='SPACE / ↑ / TAP TO JUMP · AGAIN TO DOUBLE JUMP';
   }
   function reset() {
+    randomState=(Math.floor(entropy()*4294967296)>>>0)||1;
+    checkpoint=null;checkpointClock=0;practiceHit=null;
     Object.assign(game, { mode: 'running', distance: 0, bonus: 0, speed: BASE_SPEED, time: 0, biome: 0,
       obstacles: [], pickups: [], platforms: [], particles: [], boss: null,
       nextObstacle: rand(.9,1.7), nextPickup: rand(5,8), nextRoute: rand(2.8,3.6), nextBoss: 1000, routeActive: false,
@@ -200,14 +285,15 @@
       lastUpgradeBossCount:0,event:null,nextEvent:rand(5,8),routeId:0,visitedRoute:-1,lastPattern:'',
       borderAnnounced:-1,previousBiome:0,biomeFade:0,phaseCooldown:0,phaseTrail:0,
       mutations:{},nextTraveler:18,travelerWaiting:false,portalSource:null,challenge:null,nextTrail:6,trail:null,trailId:0,
-      terrain:[],nextTerrain:5,terrainWaiting:false,terrainRun:null,bossRest:0,mutationStage:null,mutationSpeed:0 });
+      terrain:[],nextTerrain:5,terrainWaiting:false,terrainRun:null,bossRest:0,mutationStage:null,mutationSpeed:0,
+      assistMode:preferredAssist,assisted:preferredAssist!=='normal',trainingDeaths:0,deathFlash:0,assistGrace:0 });
     game.biomeOrder=discovery?[0,...shuffled(Array.from({length:BIOMES.length-1},(_,i)=>i+1))]:null;
     game.mutationBag=[];game.portalOffers=[];game.selectedPortal=0;game.voidFalling=false;
     Object.assign(dino, { y: GROUND - 45, vy: 0, jumps: 0, grounded: true, duck: false });
     duckKey = false;
     jumpHeld=false;
     achievement.record('start');achievement.record('biome',{index:0,name:activeTheme().name,worldName:worldBiome(0).name});
-    journal.runs++;discover('biomes',activeTheme().name);saveJournal();
+    if(!game.assisted)journal.runs++;discover('biomes',activeTheme().name);saveJournal();
     $('upgrade-choices').hidden=true;$('end-run').hidden=true;
     $('portal-offer').hidden=true;
     $('overlay').hidden = true;
@@ -215,10 +301,12 @@
     $('pause').setAttribute('aria-label', 'Pause game');
     announce('Run started. Double jump to reach the upper route.');
     last = null;
+    captureCheckpoint(true);
     updateHUD();
   }
   function jump() {
     if(game.mode==='portal-offer')return;
+    if(game.mode==='practice-death'){resumePractice(false);return;}
     if(game.voidFalling&&game.mode==='running')return;
     if(game.mode==='upgrade')return;
     if(game.mode==='revive'){useRevive();return;}
@@ -275,14 +363,19 @@
   function endRun() {
     achievement.record('end',{score:score()});
     game.mode = 'over';
-    high = Math.max(high, score());
-    try { localStorage.setItem('dino-jumper-best', String(high)); } catch {}
+    if(!game.assisted){high=Math.max(high,score());try{localStorage.setItem('dino-jumper-best',String(high));}catch{}}
     showOverlay('THERE’S ALWAYS ANOTHER HORIZON', 'One more try?', `You ran ${score()} points. Best run: ${high}.`, 'RUN AGAIN');
+    if(game.assisted)$('overlay-text').textContent=`Training score: ${score()} · ${game.trainingDeaths} deaths. Normal best: ${high}.` ;
     announce(`Game over. Score ${score()}. Best ${high}.`);
     updateHUD();
     saveJournal();
   }
   function offerRevive() {
+    if(game.assistMode==='practice'){practiceDeath(null,activeStage()?.reason||'fall');return;}
+    if(game.assistMode==='noclip'){
+      const gap=gapUnderfoot();registerTrainingDeath(gap,'fall');if(gap)gap.assistTouched=true;
+      Object.assign(dino,{y:GROUND-45,vy:0,jumps:0,grounded:true,duck:false});game.voidFalling=false;return;
+    }
     if(game.challenge){game.challenge.failed=true;finishPortal();return;}
     if(game.revivesUsed>=2){endRun();return;}
     const remaining=2-game.revivesUsed;
@@ -295,7 +388,7 @@
   }
   function useRevive() {
     if(game.mode!=='revive'||game.revivesUsed>=2)return;
-    game.revivesUsed++;journal.revives++;
+    game.revivesUsed++;if(!game.assisted)journal.revives++;
     achievement.record('revive',{score:score(),boss:game.boss?.level,fraction:game.boss?game.boss.age/game.boss.duration:0});
     game.obstacles=[];game.platforms=[];game.warnings=[];game.routeActive=false;
     game.terrain=[];game.terrainWaiting=false;game.nextTerrain=3;game.terrainRun=null;game.voidFalling=false;
@@ -358,6 +451,7 @@
     }
   }
   function hurt(obstacle) {
+    if(game.assistMode==='noclip'){registerTrainingDeath(obstacle,'hazard');return;}
     if (game.invincible > 0) return;
     if(game.boss){game.boss.reaction='A WORTHY RUNNER';game.boss.reactionTime=1;}
     achievement.record('hit',{shield:game.shield>0,ward:game.wardActive&&Boolean(game.boss)});
@@ -366,7 +460,8 @@
       obstacle.hit = true;
       burst(dino.x+20, dino.y+20, 14);
       toast('SHIELD SAVED YOU');
-    } else offerRevive();
+    } else if(game.assistMode==='practice')practiceDeath(obstacle,'hazard');
+    else offerRevive();
   }
   function spawnObstacle() {
     const theme = activeTheme();
@@ -458,10 +553,12 @@
     game.obstacles=[];game.pickups=[];game.platforms=[];game.particles=[];game.terrain=[];game.event=null;game.trail=null;game.routeActive=false;game.biomeSign=2.4;game.phaseTrail=0;game.nextTerrain=.25;
     Object.assign(dino,{y:GROUND-45,vy:0,jumps:0,grounded:true,duck:false});
     discover('secrets',`PORTAL · ${discovery.mutations[game.challenge.variant].name}`);
-    toast(`SECRET TRIAL · ${Math.ceil(duration)}s · 2× POINTS · ENTRY SPEED ${Math.round(entrySpeed)}`);return true;
+    captureCheckpoint(true);toast(`SECRET TRIAL · ${Math.ceil(duration)}s · 2× POINTS · ENTRY SPEED ${Math.round(entrySpeed)}`);return true;
   }
   function finishPortal(){
     const challenge=game.challenge;if(!challenge)return;
+    if(challenge.failed&&game.assistMode==='practice'){practiceDeath(challenge.engine.lastHazard,challenge.engine.reason);return;}
+    if(challenge.failed&&game.assistMode==='noclip'){registerTrainingDeath(null,challenge.engine.reason);challenge.engine.recover();challenge.failed=false;return;}
     const success=!challenge.failed&&challenge.age>=challenge.duration,saved=challenge.saved;
     Object.assign(dino,saved.dino);delete saved.dino;Object.assign(game,saved);game.challenge=null;
     game.bonus+=Math.floor(challenge.earned||0);
@@ -473,11 +570,11 @@
     game.invincible=Math.max(game.invincible,1);game.nextObstacle=Math.max(game.nextObstacle,1);
     if(success){
       game.bonus+=challenge.prize+challenge.collected*challenge.fossilValue;game.shield=Math.max(game.shield,10+game.perks.shell*2);
-      game.runFossils+=challenge.collected;journal.fossils+=challenge.collected;
+      game.runFossils+=challenge.collected;if(!game.assisted)journal.fossils+=challenge.collected;
       for(let i=0;i<challenge.collected;i++)achievement.record('pickup',{type:'fossil',points:challenge.fossilValue,score:score()});
-      const piece=discovery.uncover();
+      const piece=game.assisted?null:discovery.uncover();
       discover('secrets','PORTAL CHALLENGE · COMPLETED');
-      toast(`TRIAL COMPLETE · +${challenge.prize+challenge.collected*challenge.fossilValue} · SHIELD${piece?' · '+piece:' · MUSEUM COMPLETE'}`);
+      toast(`TRIAL COMPLETE · +${challenge.prize+challenge.collected*challenge.fossilValue} · SHIELD${game.assisted?' · TRAINING ONLY':piece?' · '+piece:' · MUSEUM COMPLETE'}`);
     }
     synchronizeBiome();saveJournal();
   }
@@ -535,8 +632,10 @@
       game.terrainRun=null;
     }
   }
-  function gapUnderfoot(){return game.terrain.find(t=>t.kind==='gap'&&dino.x+23>t.x&&dino.x+23<t.x+t.w);}
+  function gapUnderfoot(){return game.terrain.find(t=>t.kind==='gap'&&!(game.assistMode==='noclip'&&t.assistTouched)&&!(game.assistMode==='practice'&&t.practiceBridge)&&dino.x+23>t.x&&dino.x+23<t.x+t.w);}
   function terrainHit(){
+    if(game.assistMode==='practice'){practiceDeath(gapUnderfoot(),'fall');return true;}
+    if(game.assistMode==='noclip'){offerRevive();return true;}
     if(game.challenge){game.challenge.failed=true;finishPortal();return true;}
     achievement.record('hit',{shield:false,ward:false});
     offerRevive();return true;
@@ -562,7 +661,7 @@
   }
   function updateChallenge(dt){
     const c=game.challenge;c.age+=dt;game.time+=dt;c.earned+=c.engine.speed*dt/10*2;
-    c.engine.step(dt,{held:jumpHeld,duck:duckKey});c.collected=c.engine.collected;syncStagePlayer(c.engine);
+    stepStage(c.engine,dt);c.collected=c.engine.collected;syncStagePlayer(c.engine);
     if(c.engine.dead){c.failed=true;finishPortal();return;}
     if(c.age>=c.duration)finishPortal();
   }
@@ -581,7 +680,7 @@
     if(game.perks.ward) {game.shield=Math.max(game.shield,spec.duration+1);game.wardActive=true;}
     achievement.record('bossStart',{level,ward:Boolean(game.perks.ward)});
     game.routeActive = false;
-    toast(`BOSS ${level} · ${spec.name} · SURVIVE TO WIN`);
+    toast(`BOSS ${level} · ${spec.name} · SURVIVE TO WIN`);captureCheckpoint(true);
   }
   function warnAttack(type, high = false, offset = 0, options = {}) {
     game.warnings.push({ type, high, delay: .45+offset, ...options, label:
@@ -716,8 +815,8 @@
     } else {
       game.bonus+=points;
       if(pickup.type==='fossil') {
-        game.runFossils++;journal.fossils++;saveJournal();
-        if(discovery&&random()<.08){const piece=discovery.uncover();if(piece)toast(`MUSEUM DISCOVERY · ${piece}`);}
+        game.runFossils++;if(!game.assisted)journal.fossils++;saveJournal();
+        if(discovery&&!game.assisted&&random()<.08){const piece=discovery.uncover();if(piece)toast(`MUSEUM DISCOVERY · ${piece}`);}
         if(game.trail&&pickup.trailId===game.trail.id){
           game.trail.collected++;
           if(game.trail.collected===game.trail.total){game.bonus+=100*multiplier();toast('FOSSIL TRAIL COMPLETE · +100 BONUS');game.trail=null;}
@@ -728,8 +827,7 @@
   function winRun() {
     achievement.record('win',{score:score()});
     game.completed=true;game.nextBoss=Infinity;game.mode='won';
-    high=Math.max(high,score());
-    try {localStorage.setItem('dino-jumper-best',String(high));}catch{}
+    if(!game.assisted){high=Math.max(high,score());try{localStorage.setItem('dino-jumper-best',String(high));}catch{}}
     showOverlay('TEN BOSSES. ONE VERY STUBBORN DINO.', '25,000-point frontier conquered.',
       `${score()} points. Keep exploring new biomes, or restart for another challenge.`, 'EXPLORE ON');
     announce('Victory! All ten bosses defeated. Continue into the endless frontier.');
@@ -747,15 +845,17 @@
   }
   function syncStagePlayer(stage){Object.assign(dino,{y:stage.player.y,vy:stage.player.vy,grounded:stage.player.grounded,jumps:stage.player.jumps});}
   function tickStageDeath(stage){
+    if(game.assistMode==='practice'){practiceDeath(stage.lastHazard,stage.reason);return;}
+    if(game.assistMode==='noclip'){registerTrainingDeath(null,stage.reason);stage.recover();return;}
     if(['void fall','lava lake'].includes(stage.reason)){offerRevive();return;}
     hurt({});
     if(game.mode==='running'){stage.dead=false;Object.assign(stage.player,{y:['ship','ufo','jetpack'].includes(stage.mode)?145:252,vy:0,falling:false});}
   }
   function updateMutationWorld(dt){
     const stage=game.mutationStage;game.time+=dt;game.distance+=stage.speed*dt;game.bonus+=stage.speed*dt/10;
-    const value=(25+game.perks.fortune*10)*2,old=stage.collected;stage.step(dt,{held:jumpHeld,duck:duckKey});game.bonus+=(stage.collected-old)*value;
+    const value=(25+game.perks.fortune*10)*2,old=stage.collected;stepStage(stage,dt);game.bonus+=(stage.collected-old)*value;
     const collected=stage.collected-old;
-    if(collected){game.runFossils+=collected;journal.fossils+=collected;for(let i=0;i<collected;i++)achievement.record('pickup',{type:'fossil',points:value,score:score()});saveJournal();}
+    if(collected){game.runFossils+=collected;if(!game.assisted)journal.fossils+=collected;for(let i=0;i<collected;i++)achievement.record('pickup',{type:'fossil',points:value,score:score()});saveJournal();}
     for(const key of ['invincible','shield','slow','messageTimer','bossRest'])game[key]=Math.max(0,(game[key]||0)-dt);
     syncStagePlayer(stage);
     if(stage.dead){tickStageDeath(stage);return;}
@@ -769,7 +869,7 @@
     game.distance+=b.engine.speed*worldDt;game.bonus+=(multiplier()-1)*b.engine.speed*worldDt/10;
     for(const key of ['shield','slow','invincible','messageTimer'])game[key]=Math.max(0,game[key]-dt);
     if(game.wardActive&&game.shield>0)game.shield=Math.max(game.shield,b.duration-b.age+1);
-    b.age+=worldDt;b.engine.step(worldDt,{held:jumpHeld,duck:duckKey});syncStagePlayer(b.engine);
+    b.age+=worldDt;stepStage(b.engine,worldDt);syncStagePlayer(b.engine);
     if(b.engine.dead){tickStageDeath(b.engine);return;}
     synchronizeBiome();if(b.age>=b.duration)completeBoss(b);
   }
@@ -777,10 +877,11 @@
     return {x:dino.x+6,y:dino.y+(dino.duck?25:10),w:dino.duck?44:30,h:dino.duck?19:34};
   }
   function update(dt) {
+    updateTraining(dt);
     if(game.challenge){updateChallenge(dt);return;}
     if(game.boss?.engine){updateMechanicalBoss(dt);return;}
     if(trials&&discovery&&!game.boss&&activeTheme().mutation!==undefined&&!game.terrain.length&&!game.obstacles.length&&!game.platforms.length){
-      if(!game.mutationStage){game.pickups=[];game.routeActive=false;game.mutationStage=trials.create({variant:activeTheme().mutation,speed:(game.mutationSpeed||game.speed)*(game.slow>0?.58:1),width:W,height:H,random});}
+      if(!game.mutationStage){game.pickups=[];game.routeActive=false;game.mutationStage=trials.create({variant:activeTheme().mutation,speed:(game.mutationSpeed||game.speed)*(game.slow>0?.58:1),width:W,height:H,random});captureCheckpoint(true);}
       updateMutationWorld(dt);return;
     }
     // Slow motion affects world movement, not the responsiveness of the jump.
@@ -942,8 +1043,8 @@
   function updateHUD() {
     const theme = activeTheme();
     $('biome').textContent = `${String(game.biome+1).padStart(2,'0')} / ${theme.name}`;
-    $('score').textContent = `HI ${pad(Math.max(high,score()))}   ${pad(score())}`;
-    $('status').textContent = {ready:'READY TO RUN',running:game.challenge?`SURVIVE · ${game.challenge.collected} FOSSILS · ${Math.max(0,Math.ceil(game.challenge.duration-game.challenge.age))}s`:game.boss?`BOSS ${game.boss.level} / ${BOSSES.length}`:game.completed?'ENDLESS FRONTIER':'ON THE MOVE',paused:'TAKING A BREATHER',over:'UNTIL NEXT TIME',won:'GAUNTLET COMPLETE',revive:'AN EGG CAN BRING YOU BACK',upgrade:'CHOOSE A PERK','portal-offer':'AN OPTIONAL DETOUR'}[game.mode];
+    $('score').textContent = game.assisted?`TRAINING   ${pad(score())}`:`HI ${pad(Math.max(high,score()))}   ${pad(score())}`;
+    $('status').textContent = {ready:'READY TO RUN',running:game.challenge?`SURVIVE · ${game.challenge.collected} FOSSILS · ${Math.max(0,Math.ceil(game.challenge.duration-game.challenge.age))}s`:game.boss?`BOSS ${game.boss.level} / ${BOSSES.length}`:game.completed?'ENDLESS FRONTIER':'ON THE MOVE',paused:'TAKING A BREATHER',over:'UNTIL NEXT TIME',won:'GAUNTLET COMPLETE',revive:'AN EGG CAN BRING YOU BACK',upgrade:'CHOOSE A PERK','practice-death':'PRACTICE CHECKPOINT','portal-offer':'AN OPTIONAL DETOUR'}[game.mode];
     const effects = [];
     if (game.shield>0) effects.push(`SHIELD ${Math.ceil(game.shield)}s`);
     if(multiplier()===2)effects.push('2× MUTATION POINTS');
@@ -969,6 +1070,12 @@
     const stage=activeStage();$('boost').hidden=!stage||!['ship','jetpack'].includes(stage.mode);$('stage-info').textContent=stage?`${stage.mode.toUpperCase()} · ${Math.round(stage.speed)} PX/S · ${game.boss?'BOSS ARENA':'2× POINTS'}`:'';
     if($('phase')){$('phase').textContent=game.phaseCooldown>0?`X · PHASE ${Math.ceil(game.phaseCooldown)}s`:'X · PHASE READY';$('phase').disabled=game.mode!=='running'||Boolean(activeStage())||game.phaseCooldown>0;}
     document.querySelector('.game-shell').style.setProperty('--game-bg',theme.bg);
+    $('run-mode').value=game.assistMode;
+    $('training-status').textContent=game.assistMode==='normal'?(game.assisted?'ASSISTED RUN':'NORMAL RUN'):`${game.assistMode==='noclip'?'NO CLIP':'PRACTICE'} · ${game.trainingDeaths} ${game.trainingDeaths===1?'DEATH':'DEATHS'}`;
+    $('mode-help').textContent=game.assistMode==='noclip'?'Pass through danger. Red tint counts each would-be death.':game.assistMode==='practice'?'Unlimited continues. C saves a manual checkpoint; retry preserves the map.':game.assisted?'Restart in Normal for saved scores and achievements.':'Normal runs save scores, museum finds, and achievements.';
+    $('checkpoint').hidden=game.assistMode!=='practice';$('checkpoint').disabled=game.mode!=='running';
+    $('death-flash').style.opacity=String(Math.min(.28,game.deathFlash*.56));
+    $('portal-risk').textContent=game.assistMode==='noclip'?'No clip active: hazards count and flash red; this trial cannot end your run.':game.assistMode==='practice'?'Practice active: continue here or retry a checkpoint after any death.':'Death here ends your entire run. Eggs and shields cannot save you.';
   }
   function pixelDino(x,y,scale=2,duck=false,animate=true) {
     const pixel=Math.max(1,Math.floor(scale));
@@ -1427,10 +1534,14 @@
       for(const p of game.particles){if(!p.maxLife)continue;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=300*dt;p.life=Math.max(0,p.life-dt);}
       game.particles=game.particles.filter(p=>p.life>0);
     }
+    if(game.mode!=='running')game.deathFlash=Math.max(0,game.deathFlash-dt);
     updateHUD();draw();requestAnimationFrame(frame);
   }
-  $('start').addEventListener('click',()=>{if(game.mode==='paused')togglePause();else if(game.mode==='won')continueExploring();else if(game.mode==='revive')useRevive();else if(game.mode==='upgrade')chooseUpgrade('skip');else reset();canvas.focus({preventScroll:true});});
+  $('start').addEventListener('click',()=>{if(game.mode==='paused')togglePause();else if(game.mode==='won')continueExploring();else if(game.mode==='revive')useRevive();else if(game.mode==='upgrade')chooseUpgrade('skip');else if(game.mode==='practice-death')resumePractice(false);else reset();canvas.focus({preventScroll:true});});
   $('end-run').addEventListener('click',endRun);
+  $('practice-retry').addEventListener('click',()=>{resumePractice(true);canvas.focus({preventScroll:true});});
+  $('run-mode').addEventListener('change',e=>setAssistMode(e.target.value));
+  $('checkpoint').addEventListener('click',()=>captureCheckpoint(true,true));
   for(let i=0;i<3;i++)$('perk-option-'+(i+1)).addEventListener('click',()=>{chooseUpgrade(game.upgradeOffers[i]);canvas.focus({preventScroll:true});});
   $('journal')?.addEventListener('toggle',()=>{if($('journal').open&&game.mode==='running')togglePause();});
   $('restart').addEventListener('click',()=>{reset();canvas.focus({preventScroll:true});});
@@ -1442,6 +1553,7 @@
   $('sound').addEventListener('click',()=>{discovery?.toggleSound();soundLabel();});soundLabel();
   $('phase')?.addEventListener('click',()=>{phaseDash();canvas.focus({preventScroll:true});});
   document.addEventListener('keydown',e=>{
+    if(e.target===$('run-mode'))return;
     if(game.mode==='portal-offer'&&e.code==='Tab'){
       e.preventDefault();const controls=[$('portal-choice-0'),$('portal-choice-1'),$('portal-choice-2'),$('portal-enter'),$('portal-skip')];
       const current=controls.indexOf(e.target),next=(current+(e.shiftKey?-1:1)+controls.length)%controls.length;controls[next].focus();return;
@@ -1450,6 +1562,7 @@
     if(game.mode==='upgrade'&&['Digit1','Digit2','Digit3'].includes(e.code)) {
       e.preventDefault();chooseUpgrade(game.upgradeOffers[Number(e.code.slice(-1))-1]);return;
     }
+    if(e.code==='KeyC'&&game.assistMode==='practice'){e.preventDefault();if(!e.repeat)captureCheckpoint(true,true);return;}
     if(e.code==='KeyX'){e.preventDefault();if(!e.repeat)phaseDash();return;}
     if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW') {
       if(e.target instanceof HTMLButtonElement || e.target instanceof HTMLAnchorElement)return;

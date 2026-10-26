@@ -50,3 +50,13 @@ test('all nine movement modes render their real hazards and controls without non
     stage.draw(ctx,{bg:'#fff',ink:'#555',faint:'#ddd'},()=>{});assert.ok(calls>30);
   }
 });
+
+test('hidden traps reveal earlier and remain revealed until they scroll off screen',()=>{
+  for(const [kind,lead]of [['press',.8],['wall',.9],['spike',.85]]){
+    const stage=trial(7);stage.cursor=Infinity;
+    const object={kind,x:stage.player.x+stage.speed*lead,w:60,h:kind==='press'?0:50,y:242,bottom:90,hidden:true,active:false};stage.objects=[object];
+    stage.step(.01,{noclip:true});assert.equal(object.active,true,kind);assert.ok((object.x-stage.distance-stage.player.x)/stage.speed>.7);
+    for(let t=0;t<2&&stage.objects.includes(object);t+=1/120){stage.step(1/120,{noclip:true});assert.equal(object.active,true,kind);}
+    assert.equal(stage.objects.includes(object),false);
+  }
+});

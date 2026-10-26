@@ -29,7 +29,7 @@ function setup(width = 1000, seed = 12345, storage = new Map(), withAchievements
   sandbox.Math=randomMath;
   const source = fs.readFileSync(require.resolve('../game.js'), 'utf8')
     .replace('  renderJournal();updateHUD();requestAnimationFrame(frame);',
-      '  globalThis.api = {game,dino,reset,jump,update,togglePause,spawnRoute,spawnBoss,playerBox,draw,score,frame,spawnObstacle,bossAttack,launchAttack,pixelDino,DUCK_DINO,BIOMES,BOSSES,UPGRADES,getBiome,continueExploring,journal,offerRevive,useRevive,chooseUpgrade,openUpgrade,startEvent,collectPickup,endRun,discover,updateHUD,phaseDash,synchronizeBiome,borderDistance,spawnFossilTrail,offerPortal,choosePortal,finishPortal,activeTheme,spawnTerrain,terrainKind,gapUnderfoot,nextMutation,selectPortal,activeStage,BOSS_MILESTONES};');
+      '  globalThis.api = {game,dino,reset,jump,update,togglePause,spawnRoute,spawnBoss,playerBox,draw,score,frame,spawnObstacle,bossAttack,launchAttack,pixelDino,DUCK_DINO,BIOMES,BOSSES,UPGRADES,getBiome,continueExploring,journal,offerRevive,useRevive,chooseUpgrade,openUpgrade,startEvent,collectPickup,endRun,discover,updateHUD,phaseDash,synchronizeBiome,borderDistance,spawnFossilTrail,offerPortal,choosePortal,finishPortal,activeTheme,spawnTerrain,terrainKind,gapUnderfoot,nextMutation,selectPortal,activeStage,BOSS_MILESTONES,setAssistMode,captureCheckpoint,resumePractice};');
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(require.resolve('../trials.js'),'utf8'),sandbox);
   if(withDiscovery)vm.runInContext(fs.readFileSync(require.resolve('../discovery.js'),'utf8'),sandbox);
@@ -77,6 +77,86 @@ test('two jumps are allowed, a third is blocked, and landing restores jumps', ()
   a.advance(1);
   assert.equal(a.dino.grounded, true);
   assert.equal(a.dino.jumps, 0);
+});
+
+test('no clip passes through hazards, flashes red and counts one contact per hazard',()=>{
+  const a=setup();a.setAssistMode('noclip');a.game.nextBoss=Infinity;a.game.invincible=0;
+  const wall={x:90,y:220,w:90,h:72,type:'cactus',vx:.01};a.game.obstacles=[wall];
+  for(let i=0;i<20;i++)a.update(1/120);
+  assert.equal(a.game.mode,'running');assert.equal(a.game.trainingDeaths,1);assert.equal(a.game.revivesUsed,0);
+  a.updateHUD();assert.ok(Number(a.elements.get('death-flash').style.opacity)>0);
+  a.game.obstacles.push({x:90,y:220,w:90,h:72,type:'cactus',vx:.01});a.update(.01);assert.equal(a.game.trainingDeaths,2);
+});
+
+test('no clip never ends any of the nine hidden-door modes, even with no input',()=>{
+  for(let variant=0;variant<9;variant++){
+    const a=setup(390,42,new Map(),false,true);a.setAssistMode('noclip');a.offerPortal('hidden',variant);a.choosePortal(true);
+    for(let t=0;t<19&&a.game.challenge;t+=1/120)a.update(1/120);
+    assert.equal(a.game.mode,'running',`variant ${variant}`);assert.equal(a.game.challenge,null);assert.equal(a.game.revivesUsed,0);
+    assert.ok(a.game.trainingDeaths>0&&a.game.trainingDeaths<50,`one count per contact: ${variant}/${a.game.trainingDeaths}`);
+  }
+});
+
+test('practice can continue from the death location without resetting score or using an egg',()=>{
+  const a=setup();a.setAssistMode('practice');a.game.nextBoss=Infinity;a.game.invincible=0;a.game.bonus=420;
+  const obstacle={x:90,y:220,w:90,h:72,type:'cactus',vx:.01};a.game.obstacles=[obstacle];a.update(.01);
+  const score=a.score(),distance=a.game.distance;
+  assert.equal(a.game.mode,'practice-death');assert.equal(a.game.trainingDeaths,1);
+  a.resumePractice(false);assert.equal(a.game.mode,'running');assert.equal(a.score(),score);assert.equal(a.game.distance,distance);
+  assert.equal(a.game.revivesUsed,0);assert.equal(obstacle.hit,true);a.update(.1);assert.equal(a.game.mode,'running');
+});
+
+test('practice retry restores the checkpoint map and RNG instead of rerolling the section',()=>{
+  const a=setup();a.setAssistMode('practice');a.game.nextBoss=Infinity;a.game.invincible=0;a.captureCheckpoint(true,true);
+  const signature=()=>a.game.obstacles.map(({type,x,y,w,h})=>({type,x,y,w,h}));
+  for(let i=0;i<5;i++)a.spawnObstacle();const first=JSON.stringify(signature());
+  a.offerRevive();assert.equal(a.game.mode,'practice-death');a.resumePractice(true);
+  assert.equal(a.game.obstacles.length,0);assert.equal(a.game.trainingDeaths,1);
+  for(let i=0;i<5;i++)a.spawnObstacle();assert.equal(JSON.stringify(signature()),first);
+});
+
+test('practice retries and continues inside a hidden door instead of ending the run',()=>{
+  const a=setup(390,42,new Map(),false,true);a.setAssistMode('practice');a.offerPortal('hidden',4);a.choosePortal(true);
+  const stage=a.game.challenge.engine,start=JSON.stringify(stage.snapshot());
+  for(let t=0;t<3&&a.game.mode==='running';t+=1/120)a.update(1/120);
+  assert.equal(a.game.mode,'practice-death');a.resumePractice(true);
+  assert.equal(a.game.mode,'running');assert.equal(JSON.stringify(stage.snapshot()),start);assert.equal(a.game.trainingDeaths,1);
+  for(let t=0;t<3&&a.game.mode==='running';t+=1/120)a.update(1/120);
+  assert.equal(a.game.mode,'practice-death');a.resumePractice(false);assert.equal(a.game.mode,'running');
+  assert.equal(a.game.challenge.engine,stage);assert.equal(stage.dead,false);assert.equal(a.game.trainingDeaths,2);assert.equal(a.game.revivesUsed,0);
+});
+
+test('training modes persist as a preference and cannot award normal records or museum pieces',()=>{
+  const storage=new Map([['dino-jumper-best','999']]),a=setup(1000,42,storage,true,true);
+  const stats=JSON.stringify(a.achievements.state.stats);a.setAssistMode('noclip');a.game.bonus=10000;
+  a.collectPickup({x:0,y:0,type:'fossil'});a.endRun();
+  assert.equal(storage.get('dino-jumper-best'),'999');assert.equal(JSON.stringify(a.achievements.state.stats),stats);assert.equal(a.discovery.found.length,0);
+  const b=setup(1000,42,storage,false,true);assert.equal(b.game.assistMode,'noclip');assert.equal(b.game.trainingDeaths,0);
+  a.setAssistMode('normal');assert.equal(a.game.assisted,true);a.reset();assert.equal(a.game.assisted,false);
+});
+
+test('no clip completes every boss without deaths ending the run or consuming eggs',()=>{
+  for(let level=1;level<=10;level++){
+    const a=setup();a.setAssistMode('noclip');a.game.bossesDefeated=level-1;a.game.nextBoss=Infinity;
+    a.spawnBoss(level);const duration=a.game.boss.duration;a.advance(duration+.02);
+    assert.equal(a.game.boss,null,`boss ${level}`);assert.equal(a.game.mode,level===10?'won':'running');
+    assert.equal(a.game.revivesUsed,0);assert.ok(a.game.trainingDeaths>0);
+  }
+});
+
+test('practice keeps a mechanical boss and its elapsed timer when continuing after death',()=>{
+  const a=setup();a.setAssistMode('practice');a.game.bossesDefeated=8;a.game.nextBoss=Infinity;a.spawnBoss(9);a.game.invincible=0;
+  for(let t=0;t<3&&a.game.mode==='running';t+=1/120)a.update(1/120);
+  assert.equal(a.game.mode,'practice-death');const engine=a.game.boss.engine,age=a.game.boss.age;
+  a.resumePractice(false);assert.equal(a.game.mode,'running');assert.equal(a.game.boss.engine,engine);assert.equal(a.game.boss.age,age);
+  assert.equal(engine.dead,false);assert.equal(a.game.revivesUsed,0);
+});
+
+test('automatic practice checkpoints advance to safe spots near the current section',()=>{
+  const a=setup(1000,42,new Map(),false,true);a.setAssistMode('practice');a.offerPortal('hidden',6);a.choosePortal(true);const stage=a.game.challenge.engine;
+  for(let t=0;t<8&&a.game.mode==='running';t+=1/120){const input=driveTrial(stage,()=>a.jump());a.events[input.duck?'keydown':'keyup']({code:'ArrowDown',preventDefault(){}});a.update(1/120);}
+  assert.equal(a.game.mode,'running');a.offerRevive();a.resumePractice(true);
+  assert.ok(stage.age>6&&stage.age<8,'retry should return to a recent safe beat, not the portal entrance');
 });
 
 test('museum pieces never duplicate, persist, and tolerate malformed or blocked storage',()=>{

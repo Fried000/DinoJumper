@@ -2,6 +2,7 @@
   'use strict';
   const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
   const overlap=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
+  const clone=value=>JSON.parse(JSON.stringify(value,(key,item)=>typeof item==='function'?undefined:typeof item==='number'&&!Number.isFinite(item)?{$nonFinite:String(item)}:item),(key,item)=>item&&typeof item==='object'&&item.$nonFinite?Number(item.$nonFinite):item);
   const modes=['run','run','run','ufo','ship','run','rhythm','run','jetpack'];
   const bosses=[
     {name:'BEAT REAPER',variant:6,duration:16,concept:'SYNC JUMPS · DOUBLE SPIKE BEATS'},
@@ -12,7 +13,7 @@
   ];
   function create({variant=0,rank=0,speed=500,width=1000,height=360,random=Math.random}){
     const rand=(a,b)=>a+random()*(b-a),floor=292;
-    const stage={variant,rank,speed,width,height,mode:modes[variant],age:0,distance:0,dead:false,reason:'',collected:0,objects:[],gaps:[],platforms:[],cursor:speed*1.7+105,center:165,beat:rand(.63,.7),beats:0,cleanBeats:0,chapter:1,lastPattern:'',player:{x:105,y:247,w:34,h:40,vy:0,jumps:0,grounded:true,fuel:1.4,falling:false}};
+    const stage={variant,rank,speed,width,height,mode:modes[variant],age:0,distance:0,dead:false,reason:'',collisions:0,lastHazard:null,lastBoundary:null,collected:0,objects:[],gaps:[],platforms:[],cursor:speed*1.7+105,center:165,beat:rand(.63,.7),beats:0,cleanBeats:0,chapter:1,lastPattern:'',player:{x:105,y:247,w:34,h:40,vy:0,jumps:0,grounded:true,fuel:1.4,falling:false}};
     const p=stage.player;
     if(['ship','ufo','jetpack'].includes(stage.mode)){p.y=145;p.h=26;p.w=30;p.grounded=false;}
     const add=(kind,x,w,h,extra={})=>stage.objects.push({kind,x,w,h,y:floor-h,hidden:false,active:true,...extra});
@@ -65,7 +66,16 @@
       if(o.kind==='press')return [{x,y:0,w:o.w,h:o.bottom}];
       return [{x,y:o.y+(o.movingY?Math.sin(stage.age*2+o.phase)*5:0),w:o.w,h:o.h}];
     }
-    function die(reason){stage.dead=true;stage.reason=reason;}
+    function die(reason,source=null){
+      stage.reason=reason;stage.lastHazard=source?{x:source.x,w:source.w,kind:source.kind||'gap'}:null;
+      if(stage.grace)return;
+      if(stage.noclip){
+        if(source){if(source.assistTouched)return;source.assistTouched=true;}
+        else{const edge=p.y<4?'ceiling':'floor';if(stage.lastBoundary===edge)return;stage.lastBoundary=edge;}
+        stage.collisions++;return;
+      }
+      stage.dead=true;
+    }
     function jump(){
       if(stage.dead||p.falling)return;
       if(stage.mode==='ufo'){p.vy=-285;return;}
@@ -73,8 +83,9 @@
       if(p.jumps>=(stage.mode==='rhythm'?1:2))return;
       p.vy=stage.mode==='rhythm'?-620:p.jumps?-610:-660;p.jumps++;p.grounded=false;
     }
-    function step(dt,{held=false,duck=false}={}){
+    function step(dt,{held=false,duck=false,noclip=false,grace=false}={}){
       if(stage.dead)return;
+      stage.noclip=noclip;stage.grace=grace;
       stage.age+=dt;stage.distance+=speed*dt;stage.chapter=1+Math.floor(stage.age/6);generate();
       if(['ship','ufo','jetpack'].includes(stage.mode)){
         let acceleration=stage.mode==='ship'?720:stage.mode==='ufo'?850:1050;
@@ -84,7 +95,8 @@
         }else p.fuel=Math.min(1.4,p.fuel+dt*.8);
         if(duck)acceleration+=500;
         p.vy=clamp(p.vy+acceleration*dt,-330,330);p.y+=p.vy*dt;
-        if(p.y<4||p.y+p.h>height-4)die('flight boundary');
+        if(p.y<4||p.y+p.h>height-4){die('flight boundary');if(noclip||grace){p.y=clamp(p.y,5,height-p.h-5);p.vy=0;}}
+        else if(p.y>20&&p.y+p.h<height-20)stage.lastBoundary=null;
       }else{
         const bottom=p.y+p.h,gravity=stage.mode==='rhythm'?2350:1850;
         p.vy+=gravity*dt;p.y+=p.vy*dt;p.grounded=false;
@@ -97,15 +109,15 @@
           }
         }
         const hole=stage.gaps.find(g=>p.x+p.w/2+stage.distance>g.x&&p.x+p.w/2+stage.distance<g.x+g.w);
-        if(!hole&&!p.falling&&p.y+p.h>=floor&&bottom<=floor+4){p.y=floor-p.h;p.vy=0;p.jumps=0;p.grounded=true;}
+        if((!hole||(noclip&&hole.assistTouched)||grace)&&!p.falling&&p.y+p.h>=floor&&bottom<=floor+4){p.y=floor-p.h;p.vy=0;p.jumps=0;p.grounded=true;}
         if(hole&&p.y+p.h>floor+17)p.falling=true;
-        if(hole?.lava&&p.y+p.h>floor+5)die('lava lake');
-        if(p.y>height-5)die('void fall');
+        if(hole?.lava&&p.y+p.h>floor+5){die('lava lake',hole);if(noclip||grace){p.y=floor-p.h;p.vy=0;p.jumps=0;p.grounded=true;p.falling=false;}}
+        if(p.y>height-5){die('void fall',hole);if(noclip||grace){p.y=floor-p.h;p.vy=0;p.jumps=0;p.grounded=true;p.falling=false;}}
       }
       const box={x:p.x+3,y:p.y+(duck&&p.grounded?23:5),w:p.w-6,h:duck&&p.grounded?15:p.h-7};
       for(const o of stage.objects){
         const lead=(o.x-stage.distance-p.x)/speed;
-        if(o.hidden&&!o.active&&lead<(o.kind==='press'?.32:o.kind==='wall'?.43:.34)){o.active=true;o.revealedAt=stage.age;}
+        if(o.hidden&&!o.active&&lead<(o.kind==='press'?.85:o.kind==='wall'?.95:.9)){o.active=true;o.revealedAt=stage.age;}
         if(o.kind==='press'&&o.active)o.bottom=Math.min(floor-24,o.bottom+1700*dt);
         if(o.kind==='spring'){
           if(!o.used&&p.grounded&&overlap(box,{x:o.x-stage.distance,y:floor-12,w:o.w,h:16})){o.used=true;p.vy=-930;p.jumps=1;p.grounded=false;}
@@ -114,7 +126,7 @@
         if(o.kind==='token'){if(!o.collected&&overlap(box,rects(o)[0])){o.collected=true;stage.collected++;}continue;}
         if(o.kind==='gate'||o.active)for(const r of rects(o)){
           const hit={x:r.x+2,y:r.y+2,w:r.w-4,h:Math.max(0,r.h-4)};
-          if(hit.h&&overlap(box,hit))die(o.kind==='press'?'crushing ceiling':o.kind==='wall'?'phantom wall':o.kind==='gate'?'flight gate':'hidden spike');
+          if(hit.h&&overlap(box,hit))die(o.kind==='press'?'crushing ceiling':o.kind==='wall'?'phantom wall':o.kind==='gate'?'flight gate':'hidden spike',o);
         }
       }
       stage.objects=stage.objects.filter(o=>!o.collected&&o.x+o.w>stage.distance-60);
@@ -171,7 +183,29 @@
     }
     function update(dt,input){stage.held=Boolean(input.held);stage.duck=Boolean(input.duck);step(dt,input);}
     stage.jump=jump;stage.step=update;stage.draw=draw;stage.rects=rects;
+    stage.snapshot=()=>clone(stage);
+    stage.restore=saved=>{
+      const copy=clone(saved);
+      for(const key of Object.keys(stage))if(typeof stage[key]!=='function'&&key!=='player'&&!(key in copy))delete stage[key];
+      for(const [key,value]of Object.entries(copy))if(key!=='player')stage[key]=value;
+      for(const key of Object.keys(p))if(!(key in copy.player))delete p[key];
+      Object.assign(p,copy.player);stage.player=p;stage.dead=false;
+    };
+    stage.recover=()=>{
+      const end=stage.lastHazard?stage.lastHazard.x+stage.lastHazard.w-p.x+45:stage.distance;
+      const advance=Math.max(0,end-stage.distance);stage.distance+=advance;stage.age+=advance/speed;
+      const gate=stage.objects.find(o=>o.kind==='gate'&&o.x+o.w>stage.distance+p.x);
+      p.y=['ship','ufo','jetpack'].includes(stage.mode)?clamp((gate?.center||165)-p.h/2,40,height-p.h-40):floor-p.h;
+      p.vy=0;p.jumps=0;p.falling=false;p.grounded=!['ship','ufo','jetpack'].includes(stage.mode);p.fuel=1.4;stage.dead=false;stage.lastBoundary=null;
+    };
     stage.canExit=()=>!p.falling&&stage.objects.every(o=>Math.abs(o.x-stage.distance-p.x)>speed*.65)&&!stage.gaps.some(g=>g.x<stage.distance+p.x+speed*.65&&g.x+g.w>stage.distance+p.x);
+    stage.checkpointSafe=()=>{
+      if(stage.dead||p.falling)return false;
+      if(['ship','ufo','jetpack'].includes(stage.mode)){if(p.y<18||p.y+p.h>height-18)return false;}
+      else if(!p.grounded)return false;
+      const left=p.x-speed*.18,right=p.x+p.w+speed*.3;
+      return stage.objects.every(o=>['token','spring'].includes(o.kind)||rects(o).every(r=>r.x>right||r.x+r.w<left))&&!stage.gaps.some(g=>g.x-stage.distance<right&&g.x+g.w-stage.distance>left);
+    };
     return stage;
   }
   window.DinoTrials={create,bosses,modes};
